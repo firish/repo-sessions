@@ -24,16 +24,31 @@ Method: two directory trees under distinct roots ("site-a", "site-b") simulate t
 - Project dir also contains a `memory/` subdir (session memory). Scope decision for M1: sync it or not (leaning: yes, it's project-scoped state).
 - Nested `claude -p` works from within a Claude Code session (unset `CLAUDE*` env vars) — the spike is fully automatable; this becomes the canary CI pattern.
 
-## Track B — Codex: (in progress)
+## Track B — Codex: **PASS** ✅
 
-**Storage backend verified on this machine** (VS Code ChatGPT extension `openai.chatgpt-26.5715.*`, cli 0.125.0-alpha.3):
+Validated against a scratch-installed `@openai/codex` **0.145.0** with isolated `CODEX_HOME`s (live `~/.codex` never touched; auth.json copy works across versions). Machine B simulated by a second fresh home that ran its own warmup session first.
 
-- **Hybrid, confirming the AuthSec flag:** `~/.codex/state_5.sqlite` `threads` table is the session index — columns include `id`, `rollout_path` (absolute!), `cwd`, `git_origin_url`, `git_branch`, `git_sha`, `cli_version`, `source` — while transcripts remain JSONL rollouts at `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`.
-- Rollout line 1 is `session_meta` with `payload.{id, cwd, originator, cli_version, source}`.
-- Per the 0.128 change (session picker reads SQLite): **rehydration must both rewrite the rollout JSONL and upsert a `threads` row** (`rollout_path` + `cwd` are the path-bearing columns) or the session is invisible to the picker.
-- No standalone `codex` CLI on this machine — resume validation runs against a scratch-installed npm CLI with an isolated `CODEX_HOME` (never touching live `~/.codex`).
+**Storage backend (the AuthSec flag, confirmed and refined):**
 
-## Node cold-start (hook budget): (pending)
+- **Hybrid:** `state_5.sqlite` `threads` table is the session *index*; transcripts remain JSONL rollouts at `sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`. A fresh 0.145 home still creates `state_5` — no schema migration since the extension's 0.125-alpha (one less drift axis today). DB runs in WAL mode.
+- Path-bearing surfaces: rollout content (project root ×27, **`CODEX_HOME` ×10** — a third token Claude doesn't need), and in the DB row: `rollout_path`, `cwd`, **and `sandbox_policy`** (a JSON blob full of absolute project paths).
+- Rollouts are machine-global (date tree), *not* project-keyed — `locate()` filters by the `cwd` recorded inside, exactly as the plan predicted.
+
+**Resume mechanics (better than planned):**
+
+1. **`codex exec resume <id>` needs only the rewritten rollout file** — no `threads` row. Codeword recalled, site-b cwd consistent.
+2. **The index self-heals:** that resume auto-created a correct `threads` row in machine-B's DB, derived from the rollout (correct site-b cwd).
+3. **External insert also works** (needed for picker visibility *before* first resume): ATTACH machine-A's DB, copy the row, `REPLACE()` paths in `rollout_path`/`cwd`/`sandbox_policy`, bump recency → `exec resume --last` picked the inserted row and recalled the codeword, coexisting with machine-B's own sessions.
+
+Net: Track B risk collapses. The adapter's minimum viable rehydrate is "rewrite rollout, drop in date tree"; the DB upsert is a UX enhancement, not a correctness requirement. Scripts in `spike/m0b-codex/`.
+
+## Node cold-start (hook budget): **PASS** ✅
+
+Node v20.14.0: bare `node -e ''` 20ms warm / 80ms cold; `munge.mjs` 30–40ms. Well under the 150ms/hook budget (ADR-5). No Go fallback needed.
+
+## M0 verdict
+
+**Both tracks pass — no pivot, no kill criteria triggered. Proceed to M1 as planned** (CLI core + claude adapter), with M2.5 (codex) de-risked ahead of schedule. The spike scripts are the seeds of `tokenize()`/`rehydrate()`; the nested-CLI codeword test is the canary CI pattern. Remaining matrix cells (macOS↔Linux, →Windows) still owed but the mechanism is proven; Windows `\\`-escaped JSON paths are the main open question.
 
 ## Related work (recon)
 
