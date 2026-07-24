@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+*.log
+
+# Env / secrets — transcripts and tokens must never land in this repo
+.env
+.env.*
+
+# Spike outputs (working data lives in scratchpad; belt and braces)
+spike/out/
