@@ -20,7 +20,8 @@
 
 **Non-goals (v1)**
 
-- **Cross-tool resume — permanently out of scope**, not just v1. Transcripts are provider-specific execution logs; Claude cannot resume a Codex session or vice versa. The cross-tool bridge is `distill` (v2), never resume.
+- **Cross-tool resume — permanently out of scope**, not just v1. Transcripts are provider-specific execution logs; Claude cannot resume a Codex session or vice versa. The cross-tool bridge is `distill` (v2), never resume. (Post-M0 addendum: prior art like npow/session-sync and CASR proves lossy translation works for tool-free chats — that becomes v2 `css seed <id> --to <tool>`, explicit and lossy-by-contract, never automatic write-time fan-out.)
+- **Copilot/Cursor IDE chat resume-adapters — permanently out** (decided 2026-07-26). Copilot VS Code ships default-on cloud session sync since June 2026 → a second sync system on the same store means loops/dupes; both IDEs have no resume contract and churning internal stores (Copilot chat files went `.json`→`.jsonl` within months). Both become v2 **capture/distill sources** (read-only into the vault, seedable via `css seed`), never resume targets. cursor-agent (Cursor's CLI) is a legitimate future adapter — local resumable sessions, real resume command.
 - Gemini CLI, opencode, and other adapters (v2 — the adapter interface ships in v1 so these are additive).
 - Real-time mirroring of a *live* session (that's Anthropic's Remote Control; don't compete).
 - Syncing global config (`settings.json`, agents, skills) — claude-sync and dotfiles already cover this; staying session-only keeps scope tight and avoids credential-sync footguns.
@@ -190,7 +191,7 @@ Plugin adds `/sessions list|push|pull|status` as slash-command sugar over the sa
 
 ## 7. Risks
 
-1. **Anthropic ships native session sync** — Remote Control shows they're moving here. Mitigation: ship fast; the repo-scoped model, multi-tool support, and merge tooling remain differentiated; worst case it's a strong portfolio piece feeding the VS extension.
+1. **Anthropic ships native session sync** — Remote Control shows they're moving here. Mitigation: ship fast; the repo-scoped model, multi-tool support, and merge tooling remain differentiated; worst case it's a strong portfolio piece feeding the VS extension. *This risk is now confirmed-by-pattern: Microsoft reversed a "not planned" and shipped default-on Copilot session sync in June 2026. Vendors move; the launch window decays — positioning leans on what account-cloud sync can't do (repo-scoped, your own remote, multi-tool, OSS-safe).*
 2. **Format drift, now ×2** — Claude Code JSONL *and* Codex rollout format can each break us independently, and Codex has no plugin/hook contract around its session files. Canary CI runs latest builds of *both* tools against fixtures; `meta.json` pins tool versions; `css doctor` warns on drift.
 3. **Resume integrity checks** — per-track M0 kill criteria + pivot path defined; Codex adapter can drop to v1.1 without blocking launch.
 4. **Secrets-in-transcripts incident** — doctor scan + loud docs; consider push-time scan blocking by default with `--force` override. Doubly important once team sharing (§8.1) exists.
@@ -210,7 +211,7 @@ Plugin adds `/sessions list|push|pull|status` as slash-command sugar over the sa
 
 ### 8.2 Other v2 items
 
-- **Adapters:** Gemini CLI, opencode, and others behind the ADR-6 interface (v1 ships claude + codex only).
+- **Adapters:** Gemini CLI first (v1.1 fast-follow — spike during M1 downtime using the M0 codeword pattern; check Google hasn't shipped native sync first), then cursor-agent (v1.2, spike-gated, demand-driven), opencode and others as community PRs behind the ADR-6 interface (v1 ships claude + codex only). Format reference libraries: jazzyalex/agent-sessions, CASR/CASS.
 - `css import` — claude.ai paste → distilled seed session.
 - `css distill` — session → context doc / CLAUDE.md-rules PR against the project repo (cross-tool bridge; the refinery on top of the ore).
 - Cross-device session **merge/splice** — your existing tooling as the feature the claude-sync cluster can't match.
