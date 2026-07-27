@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { detectAdapters } from './adapters/registry.js';
 import { CssError, isPrefixOf, log, nowIso, sha256hex } from './engine/common.js';
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
+import { absoluteCssInvocation, customHooksPath, hookStatus, installHooks, uninstallHooks } from './engine/hooks.js';
 import { repoKeyFromOrigin } from './engine/repoKey.js';
 import { pullSessions, pushSessions, type SyncCtx } from './engine/sync.js';
 import { Vault } from './engine/vault.js';
@@ -17,6 +18,8 @@ interface Marker {
   enabledAt: string;
   lastPush?: string;
   lastPull?: string;
+  /** Last background push attempt (Stop-hook debounce cooldown). */
+  lastAttemptAt?: string;
   dirty?: boolean;
 }
 
@@ -110,7 +113,24 @@ export function cmdInit(opts: { url?: string; path?: string }): void {
 
 // ---------------------------------------------------------------- enable
 
-export function cmdEnable(cwd: string): void {
+function resolveCssCmd(): string {
+  const which = spawnSync('sh', ['-c', 'command -v css'], { encoding: 'utf8' });
+  return which.status === 0 && which.stdout.trim() ? 'css' : absoluteCssInvocation();
+}
+
+function installGitHooks(root: string): void {
+  const custom = customHooksPath(root);
+  if (custom) {
+    log.warn(`core.hooksPath is set (${custom}) — git hooks not installed`);
+    log.warn('add "css push -q" / "css pull -q" to your hook pipeline manually');
+    return;
+  }
+  for (const r of installHooks(root, resolveCssCmd())) {
+    log.info(`hook ${r.name}: ${r.action}${r.note ? ` (${r.note})` : ''}`);
+  }
+}
+
+export function cmdEnable(cwd: string, opts: { noHooks?: boolean } = {}): void {
   const cfg = requireConfig();
   const root = requireRepo(cwd);
   const origin = originUrl(root);
@@ -123,7 +143,131 @@ export function cmdEnable(cwd: string): void {
   vault.refresh();
   writeMarker(root, { dirName: key.dirName, slug: key.slug, origin: key.normalized, enabledAt: nowIso() });
   log.info(`enabled: ${key.slug} -> vault namespace ${key.dirName}`);
-  log.info('sessions will sync on css push / css pull (git hooks arrive in M2)');
+  if (opts.noHooks) {
+    log.info('hooks skipped (--no-hooks) — sync manually with css push / css pull');
+  } else {
+    installGitHooks(root);
+    log.info('sessions now ride git push / git pull on this repo');
+  }
+}
+
+// ---------------------------------------------------------------- hooks management
+
+export function cmdHooks(cwd: string, action: string | undefined): void {
+  const root = requireRepo(cwd);
+  switch (action) {
+    case 'install': {
+      requireConfig();
+      requireEnabled(root);
+      installGitHooks(root);
+      break;
+    }
+    case 'uninstall': {
+      for (const r of uninstallHooks(root)) {
+        log.info(`hook ${r.name}: ${r.action}${r.note ? ` (${r.note})` : ''}`);
+      }
+      break;
+    }
+    case 'status':
+    case undefined: {
+      const custom = customHooksPath(root);
+      if (custom) log.info(`core.hooksPath = ${custom} (css does not manage hooks here)`);
+      for (const s of hookStatus(root)) log.info(`hook ${s.name}: ${s.state}`);
+      break;
+    }
+    default:
+      throw new CssError(`unknown hooks action: ${action}`, 'use css hooks install|uninstall|status');
+  }
+}
+
+// ---------------------------------------------------------------- plugin-event hooks (css hook …)
+
+/** Guards shared by every session-lifecycle hook: never throw, never block a
+ *  session over sync problems — silently do nothing when not set up. */
+function hookContext(cwd: string): { cfg: CssConfig; root: string; marker: Marker } | null {
+  try {
+    const cfg = loadConfig();
+    if (!cfg) return null;
+    const root = repoToplevel(cwd);
+    if (!root) return null;
+    const marker = readMarker(root);
+    if (!marker) return null;
+    return { cfg, root, marker };
+  } catch {
+    return null;
+  }
+}
+
+function spawnBackgroundPush(root: string): void {
+  if (process.env.CSS_HOOK_FOREGROUND === '1') {
+    try {
+      pushSessions(buildCtx(root, requireConfig()));
+      const m = readMarker(root);
+      if (m) {
+        m.lastPush = nowIso();
+        m.dirty = false;
+        writeMarker(root, m);
+      }
+    } catch {
+      /* hooks never fail */
+    }
+    return;
+  }
+  const cli = process.argv[1];
+  if (!cli) return;
+  spawn(process.execPath, [cli, 'push', '-q'], { cwd: root, detached: true, stdio: 'ignore' }).unref();
+}
+
+const STOP_DEBOUNCE_MS = 10 * 60 * 1000;
+const ATTEMPT_COOLDOWN_MS = 2 * 60 * 1000;
+
+export function cmdHook(cwd: string, kind: string | undefined): void {
+  const ctx = hookContext(cwd);
+  if (!ctx) return; // not initialized/enabled — stay invisible
+
+  switch (kind) {
+    case 'session-start': {
+      // Pull before the session begins; surface a notice only when something arrived.
+      try {
+        const res = pullSessions(buildCtx(ctx.root, ctx.cfg));
+        ctx.marker.lastPull = nowIso();
+        writeMarker(ctx.root, ctx.marker);
+        const n = res.installed + res.fastForwarded;
+        if (n > 0) {
+          console.log(
+            JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: 'SessionStart',
+                additionalContext: `repo-sessions: ${n} session(s) synced from other devices for this repo — /sessions list to browse, claude --resume <id> to continue one.`,
+              },
+            }),
+          );
+        }
+      } catch {
+        /* vault unreachable: session starts as if we did not exist (G5) */
+      }
+      return;
+    }
+    case 'session-end': {
+      spawnBackgroundPush(ctx.root);
+      return;
+    }
+    case 'stop': {
+      // Fires after every response — must be near-free. Debounce on last
+      // successful push, with a cooldown on attempts so an unreachable vault
+      // does not cause a spawn storm.
+      const now = Date.now();
+      const last = ctx.marker.lastPush ? Date.parse(ctx.marker.lastPush) : 0;
+      const attempt = ctx.marker.lastAttemptAt ? Date.parse(ctx.marker.lastAttemptAt) : 0;
+      if (now - last < STOP_DEBOUNCE_MS || now - attempt < ATTEMPT_COOLDOWN_MS) return;
+      ctx.marker.lastAttemptAt = nowIso();
+      writeMarker(ctx.root, ctx.marker);
+      spawnBackgroundPush(ctx.root);
+      return;
+    }
+    default:
+      throw new CssError(`unknown hook event: ${kind}`, 'use css hook session-start|session-end|stop');
+  }
 }
 
 // ---------------------------------------------------------------- push / pull

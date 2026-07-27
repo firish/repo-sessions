@@ -1,23 +1,27 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmdDoctor, cmdEnable, cmdInit, cmdList, cmdPull, cmdPush, cmdStatus } from './commands.js';
+import { cmdDoctor, cmdEnable, cmdHook, cmdHooks, cmdInit, cmdList, cmdPull, cmdPush, cmdStatus } from './commands.js';
 import { CssError, log } from './engine/common.js';
 
 const HELP = `css — repo-scoped session sync for Claude Code (and soon Codex)
 
 usage:
   css init [--url <git-url>] [--path <dir>]   one-time machine setup (private vault)
-  css enable                                  register this repo for sync
+  css enable [--no-hooks]                     register this repo + install git hooks
   css push [-q]                               local sessions -> vault
   css pull [-q] [--id <session-id>]           vault sessions -> local
   css list                                    sessions for this repo
   css status                                  sync state, conflicts, reachability
+  css hooks [install|uninstall|status]        manage the git hooks for this repo
   css doctor [--verify <session-id>]          environment checks / resume canary
+
+  css hook session-start|session-end|stop     (internal: Claude Code plugin events)
 `;
 
 interface Flags {
   quiet: boolean;
+  noHooks: boolean;
   url?: string;
   path?: string;
   id?: string;
@@ -25,10 +29,11 @@ interface Flags {
 }
 
 function parseFlags(args: string[]): Flags {
-  const flags: Flags = { quiet: false };
+  const flags: Flags = { quiet: false, noHooks: false };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '-q' || a === '--quiet') flags.quiet = true;
+    else if (a === '--no-hooks') flags.noHooks = true;
     else if (a === '--url') flags.url = args[++i];
     else if (a === '--path') flags.path = args[++i];
     else if (a === '--id') flags.id = args[++i];
@@ -54,6 +59,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  // subcommand-style verbs take a bare word before flags
+  let sub: string | undefined;
+  if ((cmd === 'hooks' || cmd === 'hook') && rest[0] && !rest[0].startsWith('-')) {
+    sub = rest.shift();
+  }
+
   const flags = parseFlags(rest);
   log.quiet = flags.quiet;
 
@@ -62,7 +73,13 @@ async function main(): Promise<void> {
       cmdInit({ url: flags.url, path: flags.path });
       break;
     case 'enable':
-      cmdEnable(cwd);
+      cmdEnable(cwd, { noHooks: flags.noHooks });
+      break;
+    case 'hooks':
+      cmdHooks(cwd, sub);
+      break;
+    case 'hook':
+      cmdHook(cwd, sub);
       break;
     case 'push':
       cmdPush(cwd, { quiet: flags.quiet });
