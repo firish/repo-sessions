@@ -5,6 +5,7 @@
 node_modules/
 npm-debug.log*
 *.log
+dist/
 
 # Env / secrets — transcripts and tokens must never land in this repo
 .env

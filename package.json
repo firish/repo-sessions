@@ -1,0 +1,33 @@
+{
+  "name": "repo-sessions",
+  "version": "0.1.0",
+  "description": "Your Claude Code and Codex conversations follow your repo, not your laptop. Git-native session sync via a private vault.",
+  "type": "module",
+  "bin": {
+    "css": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "sessions",
+    "sync",
+    "git"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
