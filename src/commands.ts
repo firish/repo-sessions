@@ -6,10 +6,12 @@ import { detectAdapters } from './adapters/registry.js';
 import { CssError, isPrefixOf, log, nowIso, sha256hex } from './engine/common.js';
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
+import { pruneVault } from './engine/gc.js';
 import { absoluteCssInvocation, customHooksPath, hookStatus, installHooks, uninstallHooks } from './engine/hooks.js';
 import { repoKeyFromOrigin } from './engine/repoKey.js';
+import { describeFindings, scanSecrets } from './engine/secrets.js';
 import { pullSessions, pushSessions, type SyncCtx } from './engine/sync.js';
-import { Vault } from './engine/vault.js';
+import { Vault, readTranscript } from './engine/vault.js';
 
 interface Marker {
   dirName: string;
@@ -362,8 +364,7 @@ function collectRows(ctx: SyncCtx): Row[] {
       let state: Row['state'];
       if (sha256hex(localTok) === entry.sha256) state = 'synced';
       else {
-        const vaultTranscript = join(vault.path, key.dirName, adapter.id, 'sessions', sessionId, 'transcript.jsonl');
-        const remoteTok = existsSync(vaultTranscript) ? readFileSync(vaultTranscript, 'utf8') : '';
+        const remoteTok = readTranscript(join(vault.path, key.dirName, adapter.id, 'sessions', sessionId)) ?? '';
         state = isPrefixOf(remoteTok, localTok) ? 'ahead' : isPrefixOf(localTok, remoteTok) ? 'behind' : 'diverged';
       }
       rows.push({ sessionId, tool: adapter.id, state, device: entry.device, lastTs: local.lastTs ?? entry.lastTs, summary: local.summary ?? entry.summary, conflicts: entry.conflicts });
@@ -424,6 +425,21 @@ export function cmdStatus(cwd: string): void {
   );
 }
 
+// ---------------------------------------------------------------- gc
+
+export function cmdGc(opts: { keep?: number; days?: number }): void {
+  if (opts.keep === undefined && opts.days === undefined) {
+    throw new CssError('gc needs a retention rule', 'css gc --keep <n> and/or --days <n>');
+  }
+  const cfg = requireConfig();
+  const vault = new Vault(cfg);
+  vault.ensureCloned();
+  vault.refresh();
+  const res = pruneVault(vault, opts);
+  if (res.pruned > 0) vault.commitAndPush(`gc: pruned ${res.pruned} session(s)`);
+  log.info(`gc: pruned ${res.pruned}, kept ${res.kept}`);
+}
+
 // ---------------------------------------------------------------- doctor
 
 export async function cmdDoctor(cwd: string, opts: { verify?: string }): Promise<void> {
@@ -432,13 +448,20 @@ export async function cmdDoctor(cwd: string, opts: { verify?: string }): Promise
     if (!ok) failed = true;
     log.info(`${ok ? ' ok ' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
   };
+  const note = (name: string, detail: string): void => {
+    log.info(` --   ${name} — ${detail}`);
+  };
 
   const nodeMajor = Number(process.versions.node.split('.')[0]);
   check('node >= 20', nodeMajor >= 20, `v${process.versions.node}`);
   check('git available', git(['--version'], { allowFail: true }).ok);
 
-  const claude = spawnSync('claude', ['--version'], { encoding: 'utf8', timeout: 30_000 });
-  check('claude CLI', claude.status === 0, (claude.stdout ?? '').trim() || 'not found');
+  const adapters = detectAdapters();
+  check('agent tools detected', adapters.length > 0, adapters.map((a) => a.adapter.id).join(', ') || 'none');
+  for (const tool of ['claude', 'codex'] as const) {
+    const res = spawnSync(tool, ['--version'], { encoding: 'utf8', timeout: 30_000 });
+    note(`${tool} CLI`, res.status === 0 ? (res.stdout ?? '').trim() : 'not on PATH (sync still works; resume needs it)');
+  }
 
   const cfg = loadConfig();
   check('config present', cfg !== null, cfg ? configSummary(cfg) : 'run css init');
@@ -448,6 +471,21 @@ export async function cmdDoctor(cwd: string, opts: { verify?: string }): Promise
 
   const root = repoToplevel(cwd);
   if (root) check('repo enabled', readMarker(root) !== null, 'run css enable');
+
+  // Secret scan over this repo's local sessions (plan §4: warn before pushing).
+  if (root && readMarker(root)) {
+    let dirty = 0;
+    for (const { adapter, env } of adapters) {
+      for (const ref of adapter.locate(root, env)) {
+        const findings = scanSecrets(readFileSync(ref.filePath, 'utf8'));
+        if (findings.length > 0) {
+          dirty++;
+          log.warn(`session ${ref.sessionId.slice(0, 8)} (${adapter.id}): ${describeFindings(findings)}`);
+        }
+      }
+    }
+    note('secret scan', dirty === 0 ? 'clean' : `${dirty} session(s) with possible secrets — review before relying on vault privacy`);
+  }
 
   if (opts.verify) {
     if (!root) throw new CssError('--verify must run inside the repo');

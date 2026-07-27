@@ -7,6 +7,7 @@ import type { CssConfig } from '../src/engine/config';
 import { git } from '../src/engine/git';
 import { repoKeyFromOrigin } from '../src/engine/repoKey';
 import { pullSessions, pushSessions, type SyncCtx } from '../src/engine/sync';
+import { readTranscript } from '../src/engine/vault';
 import { mkTmp } from './helpers';
 
 const SID = '019faaaa-bbbb-cccc-dddd-000000000001';
@@ -98,8 +99,7 @@ describe('codex adapter', () => {
     expect(push1.pushed).toBe(1);
 
     const dirName = repoKeyFromOrigin(`file://${bareOrigin}`).dirName;
-    const vaultTranscript = join(ctxA.cfg.vaultPath, dirName, 'codex', 'sessions', SID, 'transcript.jsonl');
-    const tok = readFileSync(vaultTranscript, 'utf8');
+    const tok = readTranscript(join(ctxA.cfg.vaultPath, dirName, 'codex', 'sessions', SID))!;
     expect(tok).toContain('${CSS_CODEX_HOME}');
     expect(tok).not.toContain(siteA);
 

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { CssError, log } from './common.js';
 import type { CssConfig } from './config.js';
 import { git } from './git.js';
@@ -105,4 +106,34 @@ export class Vault {
   saveIndex(index: VaultIndex): void {
     writeFileSync(this.indexPath, `${JSON.stringify(index, null, 2)}\n`);
   }
+}
+
+// ---- transcript storage (gzipped in the vault; long sessions compress ~10x)
+
+const TRANSCRIPT_GZ = 'transcript.jsonl.gz';
+const TRANSCRIPT_PLAIN = 'transcript.jsonl'; // pre-M3 vaults
+
+export function writeTranscript(sessionDir: string, content: string): void {
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, TRANSCRIPT_GZ), gzipSync(Buffer.from(content)));
+  const legacy = join(sessionDir, TRANSCRIPT_PLAIN);
+  if (existsSync(legacy)) rmSync(legacy); // migrate on rewrite
+}
+
+export function readTranscript(sessionDir: string): string | null {
+  const gz = join(sessionDir, TRANSCRIPT_GZ);
+  if (existsSync(gz)) return gunzipSync(readFileSync(gz)).toString('utf8');
+  const plain = join(sessionDir, TRANSCRIPT_PLAIN);
+  if (existsSync(plain)) return readFileSync(plain, 'utf8');
+  return null;
+}
+
+export function writeConflict(sessionDir: string, device: string, content: string): void {
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, `transcript.conflict-${device}.jsonl.gz`), gzipSync(Buffer.from(content)));
+}
+
+export function readConflict(sessionDir: string, device: string): string | null {
+  const p = join(sessionDir, `transcript.conflict-${device}.jsonl.gz`);
+  return existsSync(p) ? gunzipSync(readFileSync(p)).toString('utf8') : null;
 }

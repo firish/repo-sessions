@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmdDoctor, cmdEnable, cmdHook, cmdHooks, cmdInit, cmdList, cmdPull, cmdPush, cmdStatus } from './commands.js';
+import { cmdDoctor, cmdEnable, cmdGc, cmdHook, cmdHooks, cmdInit, cmdList, cmdPull, cmdPush, cmdStatus } from './commands.js';
 import { CssError, log } from './engine/common.js';
 
 const HELP = `css — repo-scoped session sync for Claude Code (and soon Codex)
@@ -14,7 +14,8 @@ usage:
   css list                                    sessions for this repo
   css status                                  sync state, conflicts, reachability
   css hooks [install|uninstall|status]        manage the git hooks for this repo
-  css doctor [--verify <session-id>]          environment checks / resume canary
+  css gc --keep <n> --days <n>                prune old sessions from the vault
+  css doctor [--verify <session-id>]          environment checks, secret scan, resume canary
 
   css hook session-start|session-end|stop     (internal: Claude Code plugin events)
 `;
@@ -26,10 +27,17 @@ interface Flags {
   path?: string;
   id?: string;
   verify?: string;
+  keep?: number;
+  days?: number;
 }
 
 function parseFlags(args: string[]): Flags {
   const flags: Flags = { quiet: false, noHooks: false };
+  const num = (v: string | undefined, flag: string): number => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0) throw new CssError(`${flag} needs a non-negative integer`);
+    return n;
+  };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '-q' || a === '--quiet') flags.quiet = true;
@@ -38,6 +46,8 @@ function parseFlags(args: string[]): Flags {
     else if (a === '--path') flags.path = args[++i];
     else if (a === '--id') flags.id = args[++i];
     else if (a === '--verify') flags.verify = args[++i];
+    else if (a === '--keep') flags.keep = num(args[++i], '--keep');
+    else if (a === '--days') flags.days = num(args[++i], '--days');
     else throw new CssError(`unknown argument: ${a}`, 'run css help');
   }
   return flags;
@@ -92,6 +102,9 @@ async function main(): Promise<void> {
       break;
     case 'status':
       cmdStatus(cwd);
+      break;
+    case 'gc':
+      cmdGc({ keep: flags.keep, days: flags.days });
       break;
     case 'doctor':
       await cmdDoctor(cwd, { verify: flags.verify });

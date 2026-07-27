@@ -7,6 +7,7 @@ import type { CssConfig } from '../src/engine/config';
 import { git } from '../src/engine/git';
 import { repoKeyFromOrigin } from '../src/engine/repoKey';
 import { pullSessions, pushSessions, type SyncCtx } from '../src/engine/sync';
+import { readConflict, readTranscript } from '../src/engine/vault';
 import { FIXTURE_SID, mkDevice, mkTmp, seedSession, turnLine } from './helpers';
 
 /** Two simulated laptops sharing one project origin and one vault remote —
@@ -69,8 +70,8 @@ describe('two-device vault round-trip', () => {
     expect(push1.pushed).toBe(1);
     expect(push1.committed).toBe(true);
 
-    const vaultTranscript = join(ctxA.cfg.vaultPath, dirName, 'claude', 'sessions', FIXTURE_SID, 'transcript.jsonl');
-    const tok = readFileSync(vaultTranscript, 'utf8');
+    const sessionDir = join(ctxA.cfg.vaultPath, dirName, 'claude', 'sessions', FIXTURE_SID);
+    const tok = readTranscript(sessionDir)!;
     expect(tok).toContain('${CSS_PROJECT_ROOT}');
     expect(tok).not.toContain(siteA);
 
@@ -111,19 +112,13 @@ describe('two-device vault round-trip', () => {
     const push4 = pushSessions(ctxB);
     expect(push4.conflicts).toBe(1);
 
-    const conflictPath = join(
-      ctxB.cfg.vaultPath,
-      dirName,
-      'claude',
-      'sessions',
-      FIXTURE_SID,
-      'transcript.conflict-laptop-b.jsonl',
-    );
-    expect(existsSync(conflictPath)).toBe(true);
-    expect(readFileSync(conflictPath, 'utf8')).toContain('divergent turn on B');
+    const sessionDirB = join(ctxB.cfg.vaultPath, dirName, 'claude', 'sessions', FIXTURE_SID);
+    const conflictContent = readConflict(sessionDirB, 'laptop-b');
+    expect(conflictContent).not.toBeNull();
+    expect(conflictContent).toContain('divergent turn on B');
 
     // canonical transcript still carries A's line — no turns dropped anywhere
-    expect(readFileSync(vaultTranscript, 'utf8')).toContain('divergent turn on A');
+    expect(readTranscript(sessionDir)).toContain('divergent turn on A');
 
     // --- B pulling now reports divergence and keeps local intact
     const pull3 = pullSessions(ctxB);

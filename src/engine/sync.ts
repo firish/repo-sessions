@@ -7,7 +7,16 @@ import type { CssConfig } from './config.js';
 import { originUrl } from './git.js';
 import { CssError } from './common.js';
 import { repoKeyFromOrigin, type RepoKey } from './repoKey.js';
-import { Vault, type ProjectEntry, type SessionEntry, type VaultIndex } from './vault.js';
+import { describeFindings, scanSecrets } from './secrets.js';
+import {
+  Vault,
+  readTranscript,
+  writeConflict,
+  writeTranscript,
+  type ProjectEntry,
+  type SessionEntry,
+  type VaultIndex,
+} from './vault.js';
 
 export interface SyncCtx {
   repoRoot: string;
@@ -80,8 +89,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
       const tokenized = adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx);
       const sha = sha256hex(tokenized);
       const sessionDir = join(projectDir, adapter.id, 'sessions', ref.sessionId);
-      const transcriptPath = join(sessionDir, 'transcript.jsonl');
-      const existing = existsSync(transcriptPath) ? readFileSync(transcriptPath, 'utf8') : null;
+      const existing = readTranscript(sessionDir);
 
       const entry: SessionEntry = {
         byteLen: Buffer.byteLength(tokenized),
@@ -97,8 +105,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
       };
 
       if (existing === null) {
-        mkdirSync(sessionDir, { recursive: true });
-        writeFileSync(transcriptPath, tokenized);
+        writeTranscript(sessionDir, tokenized);
         tool.sessions[ref.sessionId] = entry;
         result.pushed++;
       } else if (existing === tokenized) {
@@ -106,7 +113,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
         result.upToDate++;
         continue;
       } else if (isPrefixOf(existing, tokenized)) {
-        writeFileSync(transcriptPath, tokenized);
+        writeTranscript(sessionDir, tokenized);
         tool.sessions[ref.sessionId] = entry;
         result.fastForwarded++;
       } else if (isPrefixOf(tokenized, existing)) {
@@ -114,14 +121,19 @@ export function pushSessions(ctx: SyncCtx): PushResult {
         continue;
       } else {
         // Disjoint growth of the same session on two devices: never drop turns.
-        const conflictPath = join(sessionDir, `transcript.conflict-${ctx.cfg.device}.jsonl`);
-        writeFileSync(conflictPath, tokenized);
+        writeConflict(sessionDir, ctx.cfg.device, tokenized);
         const canonical = tool.sessions[ref.sessionId];
         if (canonical) {
           canonical.conflicts = [...new Set([...(canonical.conflicts ?? []), ctx.cfg.device])];
         }
         result.conflicts++;
         log.warn(`session ${ref.sessionId.slice(0, 8)} diverged on ${ctx.cfg.device}; kept as conflict copy`);
+      }
+
+      // Only content we are actually writing gets scanned (M3): warn, never block.
+      const secrets = scanSecrets(tokenized);
+      if (secrets.length > 0) {
+        log.warn(`session ${ref.sessionId.slice(0, 8)}: possible secrets in transcript (${describeFindings(secrets)}) — vault privacy is load-bearing`);
       }
 
       writeFileSync(
@@ -178,9 +190,8 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
 
     for (const [sessionId, entry] of Object.entries(tool.sessions)) {
       if (onlyId && sessionId !== onlyId) continue;
-      const transcriptPath = join(vault.path, key.dirName, adapter.id, 'sessions', sessionId, 'transcript.jsonl');
-      if (!existsSync(transcriptPath)) continue;
-      const tokenized = readFileSync(transcriptPath, 'utf8');
+      const tokenized = readTranscript(join(vault.path, key.dirName, adapter.id, 'sessions', sessionId));
+      if (tokenized === null) continue;
 
       const local = localById.get(sessionId);
       if (!local) {
