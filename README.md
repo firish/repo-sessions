@@ -8,22 +8,37 @@ Git-native sync of coding-agent sessions across devices through a single
 embedded path rewritten for that machine. Claude Code ships first; Codex is
 next (its mechanics are already validated — see `M0-FINDINGS.md`).
 
-**Status: M1 core.** CLI + claude adapter + vault engine work end-to-end
-(17 unit tests, plus a live two-"device" round-trip in `scripts/e2e-local.sh`).
-Git/session hooks (M2) and the codex adapter (M2.5) are next; not yet published.
+**Status: M2.** Sync now rides your git muscle memory: `css enable` installs
+chain-loading git hooks (`pre-push` syncs out, `post-merge`/`post-checkout`
+sync in, in the background), and the bundled Claude Code plugin adds
+SessionStart/SessionEnd/Stop lifecycle sync plus `/sessions` commands.
+22 unit tests; `scripts/e2e-local.sh` proves the whole flow with zero manual
+sync commands. The codex adapter (M2.5) is next; not yet published.
 
 ## Quickstart
 
 ```sh
 css init                # one-time per machine: creates/clones your private vault
                         #   (or: css init --url <any-private-git-url>)
-css enable              # once per repo, on any machine
-css push                # local sessions -> vault
-css pull                # vault sessions -> this machine, rewritten for its paths
+css enable              # once per repo — after this, git push/pull sync sessions
 css list                # sessions for this repo: id, state, device, summary
 css status              # sync state, conflicts, vault reachability
+css hooks status        # what's installed; install|uninstall to manage
+css push / css pull     # manual sync (hooks make this mostly unnecessary)
 css doctor [--verify <session-id>]   # env checks; --verify resumes for real
 ```
+
+Existing hooks (including husky-style `core.hooksPath` setups) are respected:
+foreign hooks are chain-loaded and run first with their stdin/argv intact —
+their failure still aborts the git operation; css never does.
+
+## Claude Code plugin (`plugin/`)
+
+SessionStart pulls newer sessions and surfaces a one-line notice inside
+Claude; SessionEnd pushes in a detached background process; Stop debounce-
+pushes (10 min) to cover laptop-lid-close. `/sessions list|push|pull|status`
+wraps the CLI. Marketplace listing comes with M4 — until then, point Claude
+Code at the `plugin/` directory (requires `css` on PATH via `npm i -g .`).
 
 Sessions are namespaced per-repo (hash of the normalized `origin` URL), so one
 vault serves every project forever, and session data never touches the
