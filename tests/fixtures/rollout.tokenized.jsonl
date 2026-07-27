@@ -1,0 +1,4 @@
+{"timestamp":"2026-07-20T09:00:00.100Z","type":"session_meta","payload":{"id":"019faaaa-bbbb-cccc-dddd-000000000001","timestamp":"2026-07-20T09:00:00.000Z","cwd":"${CSS_PROJECT_ROOT}","originator":"codex_exec","cli_version":"0.145.0","source":"exec"}}
+{"timestamp":"2026-07-20T09:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"The codeword is ROLLOUT-5. My repo lives at ${CSS_PROJECT_ROOT}."}}
+{"timestamp":"2026-07-20T09:00:02.000Z","type":"turn_context","payload":{"cwd":"${CSS_PROJECT_ROOT}","rollout_path":"${CSS_CODEX_HOME}/sessions/2026/07/20/rollout-2026-07-20T09-00-00-019faaaa-bbbb-cccc-dddd-000000000001.jsonl","model":"gpt-5.5"}}
+{"timestamp":"2026-07-20T09:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Acknowledged: ROLLOUT-5, working in ${CSS_PROJECT_ROOT}."}]}}

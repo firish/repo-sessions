@@ -11,6 +11,9 @@ export interface SessionEntry {
   device: string;
   /** Tokenized cwd, e.g. "${CSS_PROJECT_ROOT}/blog" — decides install dir on pull. */
   cwdTok: string;
+  /** Origin-machine path relative to the tool's dataDir (machine-neutral for
+   *  codex date trees; claude recomputes at install instead). */
+  relPath?: string;
   lastTs?: string;
   summary?: string;
   toolVersion?: string;

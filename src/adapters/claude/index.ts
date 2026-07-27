@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { Adapter, AdapterEnv, PathCtx, SessionRef } from '../types.js';
+import { join, relative } from 'node:path';
+import type { Adapter, AdapterEnv, InstallRef, PathCtx, SessionRef } from '../types.js';
 import { mungeCurrent, mungeVariants } from './munge.js';
 
 const TOKEN_ROOT = '${CSS_PROJECT_ROOT}';
@@ -124,6 +124,7 @@ export const claudeAdapter: Adapter = {
         refs.push({
           sessionId: meta.sessionId,
           filePath,
+          relPath: relative(env.dataDir, filePath),
           cwd: meta.cwd,
           byteLen: st.size,
           mtimeMs: st.mtimeMs,
@@ -153,11 +154,13 @@ export const claudeAdapter: Adapter = {
       .replaceAll(TOKEN_HOME, ctx.home);
   },
 
-  installDir(cwd: string, env: AdapterEnv): string {
-    return join(env.dataDir, mungeCurrent(cwd));
+  // The stored relPath carries the ORIGIN machine's munge spelling — always
+  // recompute from the rehydrated cwd with the current rule.
+  installPath(ref: InstallRef, env: AdapterEnv): string {
+    return join(env.dataDir, mungeCurrent(ref.cwd), `${ref.sessionId}.jsonl`);
   },
 
-  verifyResume(sessionId: string, repoRoot: string): Promise<boolean> {
+  verifyResume(sessionId: string, repoRoot: string, _env: AdapterEnv): Promise<boolean> {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined && !k.startsWith('CLAUDE')) env[k] = v;

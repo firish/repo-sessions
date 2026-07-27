@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { ActiveAdapter } from '../adapters/registry.js';
 import type { PathCtx } from '../adapters/types.js';
 import { isPrefixOf, log, nowIso, sha256hex } from './common.js';
@@ -74,7 +74,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
 
   for (const { adapter, env } of ctx.adapters) {
     const tool = (project.tools[adapter.id] ??= { sessions: {} });
-    const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home };
+    const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
 
     for (const ref of adapter.locate(ctx.repoRoot, env)) {
       const tokenized = adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx);
@@ -88,6 +88,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
         sha256: sha,
         device: ctx.cfg.device,
         cwdTok: adapter.tokenize(ref.cwd, pathCtx),
+        relPath: ref.relPath,
         lastTs: ref.lastTs,
         summary: ref.summary,
         toolVersion: ref.toolVersion,
@@ -170,7 +171,7 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
   for (const { adapter, env } of ctx.adapters) {
     const tool = project.tools[adapter.id];
     if (!tool) continue;
-    const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home };
+    const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
     // Local files may live under legacy munge variants — resolve by session id,
     // never by recomputing the directory name.
     const localById = new Map(adapter.locate(ctx.repoRoot, env).map((r) => [r.sessionId, r]));
@@ -184,9 +185,9 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
       const local = localById.get(sessionId);
       if (!local) {
         const cwd = adapter.rehydrate(entry.cwdTok, pathCtx);
-        const dir = adapter.installDir(cwd, env);
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, `${sessionId}.jsonl`), adapter.rehydrate(tokenized, pathCtx));
+        const target = adapter.installPath({ sessionId, cwd, relPath: entry.relPath }, env);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, adapter.rehydrate(tokenized, pathCtx));
         result.installed++;
         continue;
       }

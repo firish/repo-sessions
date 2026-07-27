@@ -357,6 +357,7 @@ function collectRows(ctx: SyncCtx): Row[] {
       const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), {
         projectRoot: ctx.repoRoot,
         home: ctx.home,
+        toolDataDir: env.dataDir,
       });
       let state: Row['state'];
       if (sha256hex(localTok) === entry.sha256) state = 'synced';
@@ -450,11 +451,12 @@ export async function cmdDoctor(cwd: string, opts: { verify?: string }): Promise
 
   if (opts.verify) {
     if (!root) throw new CssError('--verify must run inside the repo');
-    const adapters = detectAdapters();
-    const claudeActive = adapters.find((a) => a.adapter.id === 'claude');
-    if (!claudeActive) throw new CssError('claude adapter not active');
-    log.info(`verifying resume of ${opts.verify.slice(0, 8)} (spawns claude, may take a minute)…`);
-    const ok = await claudeActive.adapter.verifyResume(opts.verify, root);
+    const owner = detectAdapters()
+      .map((a) => ({ a, ref: a.adapter.locate(root, a.env).find((r) => r.sessionId === opts.verify) }))
+      .find((x) => x.ref);
+    if (!owner) throw new CssError(`session ${opts.verify} not found locally`, 'css pull first?');
+    log.info(`verifying ${owner.a.adapter.id} resume of ${opts.verify.slice(0, 8)} (spawns the tool, may take a minute)…`);
+    const ok = await owner.a.adapter.verifyResume(opts.verify, root, owner.a.env);
     check('resume verification', ok);
   }
 
