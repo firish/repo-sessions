@@ -8,12 +8,23 @@ Git-native sync of coding-agent sessions across devices through a single
 embedded path rewritten for that machine. Claude Code ships first; Codex is
 next (its mechanics are already validated — see `M0-FINDINGS.md`).
 
-**Status: M2.** Sync now rides your git muscle memory: `css enable` installs
-chain-loading git hooks (`pre-push` syncs out, `post-merge`/`post-checkout`
-sync in, in the background), and the bundled Claude Code plugin adds
-SessionStart/SessionEnd/Stop lifecycle sync plus `/sessions` commands.
-22 unit tests; `scripts/e2e-local.sh` proves the whole flow with zero manual
-sync commands. The codex adapter (M2.5) is next; not yet published.
+**Status: M3 (pre-launch).** Both launch adapters work end-to-end and sync
+rides your git muscle memory: `css enable` installs chain-loading git hooks
+(`pre-push` syncs out, `post-merge`/`post-checkout` sync in, in the
+background), and the bundled Claude Code plugin adds SessionStart/SessionEnd/
+Stop lifecycle sync plus `/sessions` commands. Vault transcripts are gzipped,
+`css gc` handles retention, and push/doctor run a secret scan. 30 unit tests;
+`scripts/e2e-local.sh` (claude, hook-driven) and `scripts/e2e-codex.sh`
+(codex, real CLI) prove both flows live. Not yet published.
+
+## Support matrix
+
+| | Claude Code | Codex |
+|---|---|---|
+| Sessions synced | CLI + VS Code extension (same store) | CLI + VS Code extension (same store) |
+| Sync triggers | git hooks + SessionStart/End/Stop plugin hooks | git hooks only (no plugin surface) |
+| Resume on another machine | `claude --resume <id>` immediately | `codex resume <id>` immediately; interactive **picker** lists it after first resume (index self-heals; we never write codex's SQLite) |
+| Format risk | munge rule drifted before — `locate()` scans variants; `doctor --verify` is the canary | rollout schema is younger; pinned per-session via `meta.json` `toolVersion` |
 
 ## Quickstart
 
@@ -25,7 +36,8 @@ css list                # sessions for this repo: id, state, device, summary
 css status              # sync state, conflicts, vault reachability
 css hooks status        # what's installed; install|uninstall to manage
 css push / css pull     # manual sync (hooks make this mostly unnecessary)
-css doctor [--verify <session-id>]   # env checks; --verify resumes for real
+css gc --keep 20 --days 90           # vault retention (per project/tool)
+css doctor [--verify <session-id>]   # env checks, secret scan; --verify resumes for real
 ```
 
 Existing hooks (including husky-style `core.hooksPath` setups) are respected:
@@ -48,8 +60,19 @@ project's own history — safe for open-source repos by construction.
 
 Transcripts contain **whatever your sessions saw** — possibly env vars, tool
 output, proprietary code. The vault must be a **private** repo; `css init`
-refuses a public GitHub vault when it can check. Secret-scanning and
-`.cssignore` land in M3; until then, treat the vault like you treat `.env`.
+refuses a public GitHub vault when it can check. `css push` and `css doctor`
+run a gitleaks-style secret scan and **warn** (never block, in v1 — blocking
+is planned for team-vault publishing). Treat the vault like you treat `.env`.
+
+## Known gaps (pre-launch)
+
+- **Windows is untested.** JSON-escaped `\\` paths break the plain
+  string-replacement assumption; the ADR-3 matrix cell needs a Windows machine.
+- **Codex picker visibility** before first resume (see matrix) — deliberate:
+  fabricating rows in codex's SQLite risks more than it buys.
+- Demo GIFs not yet recorded — `scripts/e2e-local.sh` and `e2e-codex.sh` are
+  the choreography.
+- `.cssignore` (exclude sessions by id/pattern) not yet implemented.
 
 ## Development
 
