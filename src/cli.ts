@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmdDoctor, cmdEnable, cmdGc, cmdHook, cmdHooks, cmdInit, cmdList, cmdPull, cmdPush, cmdStatus } from './commands.js';
+import { cmdDisable, cmdDoctor, cmdEnable, cmdGc, cmdHook, cmdHooks, cmdInit, cmdList, cmdPull, cmdPush, cmdStatus } from './commands.js';
 import { CssError, log } from './engine/common.js';
 
 const HELP = `css — repo-scoped session sync for Claude Code (and soon Codex)
@@ -9,6 +9,7 @@ const HELP = `css — repo-scoped session sync for Claude Code (and soon Codex)
 usage:
   css init [--url <git-url>] [--path <dir>]   one-time machine setup (private vault)
   css enable [--no-hooks]                     register this repo + install git hooks
+  css disable                                 remove hooks + registration (data untouched)
   css push [-q]                               local sessions -> vault
   css pull [-q] [--id <session-id>]           vault sessions -> local
   css list                                    sessions for this repo
@@ -84,6 +85,9 @@ async function main(): Promise<void> {
       break;
     case 'enable':
       cmdEnable(cwd, { noHooks: flags.noHooks });
+      break;
+    case 'disable':
+      cmdDisable(cwd);
       break;
     case 'hooks':
       cmdHooks(cwd, sub);

@@ -83,4 +83,5 @@ scripts/e2e-local.sh <dir>   # live demo: real claude session through a real vau
 ```
 
 Design docs: `PLAN-repo-sessions.md` (architecture ADRs, roadmap),
-`M0-FINDINGS.md` (empirical spike results the design rests on).
+`M0-FINDINGS.md` (empirical spike results the design rests on),
+`DOGFOOD.md` (the two-laptop test protocol gating hooks-on-real-repos).

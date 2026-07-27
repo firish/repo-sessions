@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detectAdapters } from './adapters/registry.js';
@@ -72,19 +72,29 @@ function gh(args: string[]): { ok: boolean; stdout: string } {
 export function cmdInit(opts: { url?: string; path?: string }): void {
   let url = opts.url;
   if (!url) {
-    // No URL given: try to create a private vault repo via gh.
+    // No URL given: reuse the standard vault repo if it exists (second+
+    // machine), otherwise create it. Never proceed with a public one.
     if (!gh(['--version']).ok) {
       throw new CssError('no vault URL given and gh is not installed', 'run: css init --url <private-git-url>');
     }
     const login = gh(['api', 'user', '-q', '.login']);
     if (!login.ok || !login.stdout) throw new CssError('gh is not authenticated', 'gh auth login, or pass --url');
     const name = 'claude-sessions-vault';
-    const create = gh(['repo', 'create', `${login.stdout}/${name}`, '--private']);
-    if (!create.ok) {
-      throw new CssError(`could not create ${login.stdout}/${name}`, 'create a private repo yourself and pass --url');
+    const slug = `${login.stdout}/${name}`;
+    const view = gh(['repo', 'view', slug, '--json', 'visibility', '-q', '.visibility']);
+    if (view.ok) {
+      if (view.stdout.toUpperCase() !== 'PRIVATE') {
+        throw new CssError(`${slug} exists but is ${view.stdout} — refusing`, 'make it private first, or pass --url');
+      }
+      log.info(`reusing existing private vault repo ${slug}`);
+    } else {
+      const create = gh(['repo', 'create', slug, '--private']);
+      if (!create.ok) {
+        throw new CssError(`could not create ${slug}`, 'create a private repo yourself and pass --url');
+      }
+      log.info(`created private vault repo ${slug}`);
     }
-    url = `git@github.com:${login.stdout}/${name}.git`;
-    log.info(`created private vault repo ${login.stdout}/${name}`);
+    url = `git@github.com:${slug}.git`;
   }
 
   // The vault must be private — hard requirement (transcripts may hold secrets).
@@ -150,6 +160,22 @@ export function cmdEnable(cwd: string, opts: { noHooks?: boolean } = {}): void {
   } else {
     installGitHooks(root);
     log.info('sessions now ride git push / git pull on this repo');
+  }
+}
+
+// ---------------------------------------------------------------- disable
+
+export function cmdDisable(cwd: string): void {
+  const root = requireRepo(cwd);
+  for (const r of uninstallHooks(root)) {
+    log.info(`hook ${r.name}: ${r.action}${r.note ? ` (${r.note})` : ''}`);
+  }
+  const p = markerPath(root);
+  if (existsSync(p)) {
+    rmSync(p);
+    log.info('repo disabled — local sessions and vault data untouched');
+  } else {
+    log.info('repo was not enabled');
   }
 }
 
