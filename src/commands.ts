@@ -94,7 +94,9 @@ export function cmdInit(opts: { url?: string; path?: string }): void {
       }
       log.info(`created private vault repo ${slug}`);
     }
-    url = `git@github.com:${slug}.git`;
+    // Follow gh's configured git protocol — https users often have no SSH keys.
+    const proto = gh(['config', 'get', '-h', 'github.com', 'git_protocol']);
+    url = proto.ok && proto.stdout.trim() === 'ssh' ? `git@github.com:${slug}.git` : `https://github.com/${slug}.git`;
   }
 
   // The vault must be private — hard requirement (transcripts may hold secrets).
@@ -414,8 +416,9 @@ export function cmdList(cwd: string): void {
   for (const r of rows) {
     const age = r.lastTs ? r.lastTs.slice(0, 16).replace('T', ' ') : '                ';
     const flag = r.conflicts?.length ? ` [conflicts: ${r.conflicts.join(',')}]` : '';
+    // Full id: it needs to be copy-pasteable into `claude --resume <id>`.
     log.info(
-      `${r.sessionId.slice(0, 8)}  ${r.tool.padEnd(6)}  ${r.state.padEnd(8)}  ${r.device.padEnd(12)}  ${age}  ${(r.summary ?? '').slice(0, 48)}${flag}`,
+      `${r.sessionId}  ${r.tool.padEnd(6)}  ${r.state.padEnd(8)}  ${r.device.padEnd(12)}  ${age}  ${(r.summary ?? '').slice(0, 40)}${flag}`,
     );
   }
 }
