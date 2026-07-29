@@ -25,7 +25,7 @@ export function mkDevice(base: string, name: string): { home: string; env: Adapt
 
 /** Install the fixture session as a hydrated local transcript for `cwd`. */
 export function seedSession(env: AdapterEnv, cwd: string, home: string): string {
-  const hydrated = claudeAdapter.rehydrate(fixtureTokenized(), { projectRoot: cwd, home });
+  const hydrated = claudeAdapter.rehydrate(fixtureTokenized(), { projectRoot: cwd, home }, { json: true });
   const dir = join(env.dataDir, mungeCurrent(cwd));
   mkdirSync(dir, { recursive: true });
   const filePath = join(dir, `${FIXTURE_SID}.jsonl`);

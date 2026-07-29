@@ -32,3 +32,49 @@ describe('claude tokenize/rehydrate', () => {
     expect(hydratedB).not.toContain('alice');
   });
 });
+
+/** Regression: raw "C:\Users\x" substituted into a JSON string produces
+ *  invalid escapes (\U) — Claude Code then fails to parse those lines, the
+ *  parentUuid chain breaks, and the session renders only its last turns. */
+describe('windows path forms in jsonl content', () => {
+  const win = { projectRoot: 'c:\\Users\\rishi\\dev\\proj', home: 'C:\\Users\\rishi' };
+  const json = { json: true };
+
+  it('rehydrate emits JSON-escaped backslashes — every line stays parseable', () => {
+    const hydrated = claudeAdapter.rehydrate(fixtureTokenized(), win, json);
+    for (const line of hydrated.split('\n').filter(Boolean)) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+    expect(hydrated).toContain('c:\\\\Users\\\\rishi\\\\dev\\\\proj');
+    expect(hydrated).not.toContain('${CSS_');
+  });
+
+  it('windows round-trip: rehydrate then tokenize restores the exact vault form', () => {
+    const hydrated = claudeAdapter.rehydrate(fixtureTokenized(), win, json);
+    expect(claudeAdapter.tokenize(hydrated, win, json)).toBe(fixtureTokenized());
+  });
+
+  it('tokenize catches escaped, forward-slash, and either drive-letter case', () => {
+    const line = JSON.stringify({
+      cwd: 'C:\\Users\\rishi\\dev\\proj',
+      file: 'c:/Users/rishi/dev/proj/src/a.ts',
+      home: 'C:\\Users\\rishi',
+    });
+    const tok = claudeAdapter.tokenize(line, win, json);
+    expect(tok).not.toContain('rishi');
+    const parsed = JSON.parse(tok) as Record<string, string>;
+    expect(parsed.cwd).toBe('${CSS_PROJECT_ROOT}');
+    expect(parsed.file).toBe('${CSS_PROJECT_ROOT}/src/a.ts');
+    expect(parsed.home).toBe('${CSS_HOME}');
+  });
+
+  it('re-tokenizing previously corrupted raw-backslash content heals it', () => {
+    // file bytes as the old bug wrote them: {"command":"ls C:\Users\rishi\dev\proj"}
+    const corrupt = '{"command":"ls C:\\Users\\rishi\\dev\\proj"}';
+    expect(() => JSON.parse(corrupt)).toThrow(); // proves the fixture is the broken shape
+    const tok = claudeAdapter.tokenize(corrupt, win, json);
+    expect(JSON.parse(tok)).toEqual({ command: 'ls ${CSS_PROJECT_ROOT}' });
+    const repaired = claudeAdapter.rehydrate(tok, win, json);
+    expect(JSON.parse(repaired)).toEqual({ command: 'ls c:\\Users\\rishi\\dev\\proj' });
+  });
+});

@@ -1,5 +1,11 @@
 /** ADR-6: every tool-specific assumption lives behind this interface. */
 
+/** How tokenize/rehydrate treat the content they substitute into. */
+export interface SubstOpts {
+  /** Content is serialized JSON (jsonl transcripts). */
+  json?: boolean;
+}
+
 export interface PathCtx {
   projectRoot: string;
   home: string;
@@ -53,10 +59,13 @@ export interface Adapter {
   detect(env: AdapterEnv): boolean;
   /** All local sessions whose recorded cwd is the repo root or inside it. */
   locate(repoRoot: string, env: AdapterEnv): SessionRef[];
-  /** Absolute paths -> ${CSS_*} tokens (vault-canonical form). */
-  tokenize(content: string, ctx: PathCtx): string;
-  /** ${CSS_*} tokens -> concrete local paths. */
-  rehydrate(content: string, ctx: PathCtx): string;
+  /** Absolute paths -> ${CSS_*} tokens (vault-canonical form).
+   *  Pass json for JSONL content: matches JSON-escaped path spellings too. */
+  tokenize(content: string, ctx: PathCtx, opts?: SubstOpts): string;
+  /** ${CSS_*} tokens -> concrete local paths.
+   *  Pass json for JSONL content: emits JSON-escaped spellings so Windows
+   *  backslashes never produce invalid escapes inside string literals. */
+  rehydrate(content: string, ctx: PathCtx, opts?: SubstOpts): string;
   /** Absolute file path where a rehydrated session must be installed so the
    *  tool's resume finds it. */
   installPath(ref: InstallRef, env: AdapterEnv): string;

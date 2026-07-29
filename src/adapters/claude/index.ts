@@ -2,7 +2,8 @@ import { execFile } from 'node:child_process';
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { Adapter, AdapterEnv, InstallRef, MemoryRef, PathCtx, SessionRef } from '../types.js';
+import type { Adapter, AdapterEnv, InstallRef, MemoryRef, PathCtx, SessionRef, SubstOpts } from '../types.js';
+import { emitPath, sameOrInside, tokenizePath } from '../pathforms.js';
 import { mungeCurrent, mungeVariants } from './munge.js';
 
 const TOKEN_ROOT = '${CSS_PROJECT_ROOT}';
@@ -120,7 +121,7 @@ export const claudeAdapter: Adapter = {
         if (!st.isFile()) continue;
         const meta = scanSession(filePath, st.size);
         if (!meta) continue;
-        if (meta.cwd !== repoRoot && !meta.cwd.startsWith(`${repoRoot}/`)) continue;
+        if (!sameOrInside(meta.cwd, repoRoot)) continue;
         refs.push({
           sessionId: meta.sessionId,
           filePath,
@@ -137,21 +138,25 @@ export const claudeAdapter: Adapter = {
     return refs.sort((a, b) => a.mtimeMs - b.mtimeMs);
   },
 
-  tokenize(content: string, ctx: PathCtx): string {
-    let out = content.replaceAll(ctx.projectRoot, TOKEN_ROOT);
+  tokenize(content: string, ctx: PathCtx, opts?: SubstOpts): string {
+    const json = opts?.json ?? false;
+    let out = tokenizePath(content, ctx.projectRoot, TOKEN_ROOT, json);
     // Munged dirnames appear when tool output references ~/.claude/projects/...;
     // prefix substitution also covers subdir dirnames (munge(root) + "-sub").
+    // Munges carry no separators, so spelling variants don't apply — but the
+    // drive-letter case does (munge("c:\...") !== munge("C:\...")).
     for (const variant of mungeVariants(ctx.projectRoot)) {
       out = out.replaceAll(variant, TOKEN_DIRNAME);
     }
-    return out.replaceAll(ctx.home, TOKEN_HOME);
+    return tokenizePath(out, ctx.home, TOKEN_HOME, json);
   },
 
-  rehydrate(content: string, ctx: PathCtx): string {
+  rehydrate(content: string, ctx: PathCtx, opts?: SubstOpts): string {
+    const json = opts?.json ?? false;
     return content
-      .replaceAll(TOKEN_ROOT, ctx.projectRoot)
+      .replaceAll(TOKEN_ROOT, emitPath(ctx.projectRoot, json))
       .replaceAll(TOKEN_DIRNAME, mungeCurrent(ctx.projectRoot))
-      .replaceAll(TOKEN_HOME, ctx.home);
+      .replaceAll(TOKEN_HOME, emitPath(ctx.home, json));
   },
 
   // The stored relPath carries the ORIGIN machine's munge spelling — always

@@ -26,7 +26,7 @@ function mkCodexDevice(base: string, name: string): { home: string; env: Adapter
 }
 
 function seedRollout(env: AdapterEnv, home: string, cwd: string): string {
-  const hydrated = codexAdapter.rehydrate(fixture(), { projectRoot: cwd, home, toolDataDir: env.dataDir });
+  const hydrated = codexAdapter.rehydrate(fixture(), { projectRoot: cwd, home, toolDataDir: env.dataDir }, { json: true });
   const filePath = join(env.dataDir, REL);
   mkdirSync(join(env.dataDir, 'sessions', '2026', '07', '20'), { recursive: true });
   writeFileSync(filePath, hydrated);
@@ -108,8 +108,9 @@ describe('codex adapter', () => {
     const fileB = join(devB.env.dataDir, REL); // same machine-neutral date-tree path
     expect(existsSync(fileB)).toBe(true);
     const contentB = readFileSync(fileB, 'utf8');
-    expect(contentB).toContain(`"cwd":"${siteB}"`);
-    expect(contentB).toContain(join(devB.env.dataDir, 'sessions'));
+    expect(contentB).toContain(`"cwd":${JSON.stringify(siteB)}`);
+    // rollout_path self-reference: escaped local CODEX_HOME + the token's "/" tail
+    expect(contentB).toContain(`${JSON.stringify(devB.env.dataDir).slice(1, -1)}/sessions`);
     expect(contentB).not.toContain(siteA);
     expect(contentB).not.toContain('${CSS_');
 
@@ -121,7 +122,7 @@ describe('codex adapter', () => {
     expect(pushSessions(ctxB).fastForwarded).toBe(1);
     const pull2 = pullSessions(ctxA);
     expect(pull2.fastForwarded).toBe(1);
-    expect(readFileSync(join(devA.env.dataDir, REL), 'utf8')).toContain(`continued at ${siteA}`);
+    expect(readFileSync(join(devA.env.dataDir, REL), 'utf8')).toContain(JSON.stringify(`continued at ${siteA}`).slice(1, -1));
     expect(pushSessions(ctxA).upToDate).toBe(1);
   });
 });

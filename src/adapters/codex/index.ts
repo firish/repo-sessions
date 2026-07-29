@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { Adapter, AdapterEnv, InstallRef, PathCtx, SessionRef } from '../types.js';
+import type { Adapter, AdapterEnv, InstallRef, PathCtx, SessionRef, SubstOpts } from '../types.js';
+import { emitPath, sameOrInside, tokenizePath } from '../pathforms.js';
 
 /**
  * Codex adapter — mechanics validated by M0 Track B on codex 0.145:
@@ -118,7 +119,7 @@ export const codexAdapter: Adapter = {
       const st = statSync(filePath);
       const meta = scanRollout(filePath, st.size);
       if (!meta) continue;
-      if (meta.cwd !== repoRoot && !meta.cwd.startsWith(`${repoRoot}/`)) continue;
+      if (!sameOrInside(meta.cwd, repoRoot)) continue;
       refs.push({
         sessionId: meta.sessionId,
         filePath,
@@ -134,16 +135,18 @@ export const codexAdapter: Adapter = {
     return refs.sort((a, b) => a.mtimeMs - b.mtimeMs);
   },
 
-  tokenize(content: string, ctx: PathCtx): string {
-    let out = content.replaceAll(ctx.projectRoot, TOKEN_ROOT);
-    if (ctx.toolDataDir) out = out.replaceAll(ctx.toolDataDir, TOKEN_CODEX_HOME);
-    return out.replaceAll(ctx.home, TOKEN_HOME);
+  tokenize(content: string, ctx: PathCtx, opts?: SubstOpts): string {
+    const json = opts?.json ?? false;
+    let out = tokenizePath(content, ctx.projectRoot, TOKEN_ROOT, json);
+    if (ctx.toolDataDir) out = tokenizePath(out, ctx.toolDataDir, TOKEN_CODEX_HOME, json);
+    return tokenizePath(out, ctx.home, TOKEN_HOME, json);
   },
 
-  rehydrate(content: string, ctx: PathCtx): string {
-    let out = content.replaceAll(TOKEN_ROOT, ctx.projectRoot);
-    if (ctx.toolDataDir) out = out.replaceAll(TOKEN_CODEX_HOME, ctx.toolDataDir);
-    return out.replaceAll(TOKEN_HOME, ctx.home);
+  rehydrate(content: string, ctx: PathCtx, opts?: SubstOpts): string {
+    const json = opts?.json ?? false;
+    let out = content.replaceAll(TOKEN_ROOT, emitPath(ctx.projectRoot, json));
+    if (ctx.toolDataDir) out = out.replaceAll(TOKEN_CODEX_HOME, emitPath(ctx.toolDataDir, json));
+    return out.replaceAll(TOKEN_HOME, emitPath(ctx.home, json));
   },
 
   // Date-tree paths are machine-neutral; preserving them keeps resume-by-id

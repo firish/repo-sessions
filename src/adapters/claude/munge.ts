@@ -19,7 +19,19 @@ export function mungeLegacyUnderscore(absPath: string): string {
   return absPath.replace(/[^A-Za-z0-9_-]/g, '-');
 }
 
-/** All known munge spellings for a path, current rule first, deduped. */
+/** All known munge spellings for a path, current rule first, deduped.
+ *  Windows drive-letter case varies by entrypoint (PowerShell "C:\", VS Code
+ *  "c:\") and survives into the munge, so both cases are candidates. */
 export function mungeVariants(absPath: string): string[] {
-  return [...new Set([mungeCurrent(absPath), mungeLegacyUnderscore(absPath)])];
+  const seeds = new Set<string>([absPath]);
+  if (/^[a-zA-Z]:/.test(absPath)) {
+    seeds.add(absPath.charAt(0).toLowerCase() + absPath.slice(1));
+    seeds.add(absPath.charAt(0).toUpperCase() + absPath.slice(1));
+  }
+  const out = new Set<string>();
+  for (const seed of seeds) {
+    out.add(mungeCurrent(seed));
+    out.add(mungeLegacyUnderscore(seed));
+  }
+  return [...out];
 }
