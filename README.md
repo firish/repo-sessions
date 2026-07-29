@@ -103,6 +103,23 @@ summarizes it. CLAUDE.md travels with the repo, sessions travel in the
 vault, memory travels in the vault — the project's whole AI state moves as
 one.
 
+## What travels, and why
+
+Claude Code splits project state into two kinds: **intentional** state you
+author (skills, agents, commands, `.mcp.json`, `CLAUDE.md`, settings) gets a
+git-tracked home inside the repo — for those, *git itself is the sync*, and
+it rides the same push/pull we hook. **Emergent** state your work produces
+(sessions, memory) lands machine-local under `~/.claude` — that's the gap
+this tool exists to close.
+
+| State | Travels via | Notes |
+|---|---|---|
+| Sessions, project memory | **the vault (us)** | tokenized, secret-scanned, history-recoverable |
+| `CLAUDE.md`, `.claude/skills\|agents\|commands`, `.mcp.json`, `.claude/settings.json` | **the repo (git, natively)** | want it on every machine? put it here |
+| "Always allow" rules (`.claude/settings.local.json`) | nothing today | v1.1: opt-in sync of `permissions` keys only — never `env` |
+| Global config (`~/.claude/*`, user-scope MCP servers) | dotfiles managers | machine state, not project state — out of scope by design |
+| Local-scope MCP servers (`~/.claude.json`) | nothing, on purpose | local-scope *is* the choice not to share; promote to `.mcp.json` to travel |
+
 ## Claude Code plugin (`plugin/`)
 
 SessionStart pulls newer sessions, names what arrived, and warns if you
