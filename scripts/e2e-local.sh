@@ -41,8 +41,8 @@ echo "session: $SID"
 
 echo "=== machine A: init + enable (installs git hooks) ==="
 export CSS_CONFIG_DIR="$BASE/config-a"
-$CSS init --url "file://$BASE/vault.git" --path "$BASE/vault-clone-a"
-(cd "$SITE_A" && $CSS enable && $CSS hooks status)
+$CSS setup --url "file://$BASE/vault.git" --path "$BASE/vault-clone-a"
+(cd "$SITE_A" && $CSS init && $CSS hooks status)
 
 echo "=== machine A: plain git push must sync the session (pre-push hook) ==="
 cd "$SITE_A"
@@ -57,9 +57,9 @@ echo "=== machine B: clone project, init css, enable ==="
 git clone --quiet "file://$BASE/origin.git" "$BASE/site-b/proj"
 SITE_B="$BASE/site-b/proj"
 export CSS_CONFIG_DIR="$BASE/config-b"
-$CSS init --url "file://$BASE/vault.git" --path "$BASE/vault-clone-b"
+$CSS setup --url "file://$BASE/vault.git" --path "$BASE/vault-clone-b"
 node -e 'const f=process.argv[1]+"/config.json",fs=require("fs"),c=JSON.parse(fs.readFileSync(f,"utf8"));c.device="laptop-b-sim";fs.writeFileSync(f,JSON.stringify(c,null,2))' "$CSS_CONFIG_DIR"
-(cd "$SITE_B" && $CSS enable)
+(cd "$SITE_B" && $CSS init)
 
 echo "=== negative control: resume on B before any pull (must fail) ==="
 cd "$SITE_B"

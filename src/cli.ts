@@ -1,23 +1,26 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmdDisable, cmdDoctor, cmdDuplicate, cmdEnable, cmdGc, cmdHook, cmdHooks, cmdInit, cmdList, cmdName, cmdPull, cmdPush, cmdRebase, cmdSplit, cmdStatus } from './commands.js';
+import { cmdDisable, cmdDoctor, cmdFork, cmdGc, cmdHook, cmdHooks, cmdIgnore, cmdInit, cmdList, cmdName, cmdPull, cmdPush, cmdRebase, cmdResume, cmdRm, cmdSetup, cmdSplit, cmdStatus } from './commands.js';
 import { CssError, log } from './engine/common.js';
 
 const HELP = `chat — your agent sessions follow your repo (Claude Code + Codex)
 
 usage:
-  chat init [--url <git-url>] [--path <dir>]  one-time machine setup (private vault)
-  chat enable [--no-hooks]                    register this repo + install git hooks
+  chat setup [--url <git-url>] [--path <dir>] one-time machine setup (private vault)
+  chat init [--no-hooks]                      register this repo + install git hooks
   chat disable                                remove hooks + registration (data untouched)
   chat push [-q]                              local sessions -> vault
   chat pull [-q] [--id <session|name>]        vault sessions -> local
   chat list                                   sessions for this repo
   chat status                                 sync state, conflicts, reachability
+  chat resume <session|name>                  resume a session (pulls it first if needed)
   chat name <session|name> <new-name>         name a session (names sync via the vault)
   chat rebase <session|name>                  reconcile a diverged session (replay tails onto trunk)
   chat split <session|name>                   turn a diverged branch into its own session
-  chat duplicate <session|name>               fork a session into a new id
+  chat fork <session|name>                    fork a session into a new id
+  chat rm <session|name> [--force]            delete a session (local + vault; vault history keeps it)
+  chat ignore <session|name|glob>             never sync a session (.chatignore)
   chat hooks [install|uninstall|status]       manage the git hooks for this repo
   chat gc --keep <n> --days <n>               prune old sessions from the vault
   chat doctor [--verify <session-id>]         environment checks, secret scan, resume canary
@@ -25,12 +28,13 @@ usage:
   chat hook session-start|session-end|stop    (internal: Claude Code plugin events)
 
 Anywhere a <session> is expected, a name, full id, or unique id prefix works.
-("css" is kept as an alias bin.)
+(aliases kept: css bin, enable=init, duplicate=fork, merge=rebase)
 `;
 
 interface Flags {
   quiet: boolean;
   noHooks: boolean;
+  force: boolean;
   url?: string;
   path?: string;
   id?: string;
@@ -40,7 +44,7 @@ interface Flags {
 }
 
 function parseFlags(args: string[]): Flags {
-  const flags: Flags = { quiet: false, noHooks: false };
+  const flags: Flags = { quiet: false, noHooks: false, force: false };
   const num = (v: string | undefined, flag: string): number => {
     const n = Number(v);
     if (!Number.isInteger(n) || n < 0) throw new CssError(`${flag} needs a non-negative integer`);
@@ -50,6 +54,7 @@ function parseFlags(args: string[]): Flags {
     const a = args[i];
     if (a === '-q' || a === '--quiet') flags.quiet = true;
     else if (a === '--no-hooks') flags.noHooks = true;
+    else if (a === '--force') flags.force = true;
     else if (a === '--url') flags.url = args[++i];
     else if (a === '--path') flags.path = args[++i];
     else if (a === '--id') flags.id = args[++i];
@@ -79,7 +84,7 @@ async function main(): Promise<void> {
 
   // subcommand-style verbs take bare words (action, session, name) before flags
   const subArgs: string[] = [];
-  if (['hooks', 'hook', 'merge', 'rebase', 'split', 'duplicate', 'name'].includes(cmd)) {
+  if (['hooks', 'hook', 'merge', 'rebase', 'split', 'duplicate', 'fork', 'name', 'rm', 'resume', 'ignore'].includes(cmd)) {
     while (rest[0] && !rest[0].startsWith('-')) subArgs.push(rest.shift()!);
   }
   const sub = subArgs[0];
@@ -88,11 +93,12 @@ async function main(): Promise<void> {
   log.quiet = flags.quiet;
 
   switch (cmd) {
-    case 'init':
-      cmdInit({ url: flags.url, path: flags.path });
+    case 'setup':
+      cmdSetup({ url: flags.url, path: flags.path });
       break;
-    case 'enable':
-      cmdEnable(cwd, { noHooks: flags.noHooks });
+    case 'init':
+    case 'enable': // pre-rename alias
+      cmdInit(cwd, { noHooks: flags.noHooks });
       break;
     case 'disable':
       cmdDisable(cwd);
@@ -125,11 +131,21 @@ async function main(): Promise<void> {
     case 'split':
       cmdSplit(cwd, sub);
       break;
-    case 'duplicate':
-      cmdDuplicate(cwd, sub);
+    case 'fork':
+    case 'duplicate': // pre-rename alias
+      cmdFork(cwd, sub);
       break;
     case 'name':
       cmdName(cwd, sub, subArgs[1]);
+      break;
+    case 'rm':
+      cmdRm(cwd, sub, { force: flags.force });
+      break;
+    case 'resume':
+      cmdResume(cwd, sub);
+      break;
+    case 'ignore':
+      cmdIgnore(cwd, sub);
       break;
     case 'doctor':
       await cmdDoctor(cwd, { verify: flags.verify });

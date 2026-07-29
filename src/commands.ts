@@ -7,10 +7,12 @@ import { CssError, isPrefixOf, log, nowIso, sha256hex } from './engine/common.js
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
 import { pruneVault } from './engine/gc.js';
+import { appendIgnore, loadIgnorePatterns, makeIgnoreFn, IGNORE_FILE } from './engine/ignore.js';
 import { duplicateSession, mergeSession, summarizeMerge } from './engine/merge.js';
 import { absoluteCssInvocation, customHooksPath, hookStatus, installHooks, uninstallHooks } from './engine/hooks.js';
 import { findByName, resolveSessionInput, uniquifyName, validateName } from './engine/naming.js';
 import { repoKeyFromOrigin } from './engine/repoKey.js';
+import { rmSession } from './engine/rm.js';
 import { describeFindings, scanSecrets } from './engine/secrets.js';
 import { pullSessions, pushSessions, type SyncCtx } from './engine/sync.js';
 import { Vault, readTranscript, type ProjectEntry, type SessionEntry } from './engine/vault.js';
@@ -42,7 +44,7 @@ function writeMarker(repoRoot: string, marker: Marker): void {
 
 function requireConfig(): CssConfig {
   const cfg = loadConfig();
-  if (!cfg) throw new CssError('chat is not initialized on this machine', 'run: chat init --url <private-git-url>');
+  if (!cfg) throw new CssError('chat is not set up on this machine', 'run: chat setup   (one-time; creates your private vault)');
   return cfg;
 }
 
@@ -74,14 +76,14 @@ function requireRepo(cwd: string): string {
 
 function requireEnabled(repoRoot: string): Marker {
   const marker = readMarker(repoRoot);
-  if (!marker) throw new CssError('this repo is not enabled for session sync', 'run: chat enable');
+  if (!marker) throw new CssError('this repo is not enabled for session sync', 'run: chat init  (in this repo)');
   return marker;
 }
 
 function buildCtx(repoRoot: string, cfg: CssConfig): SyncCtx {
   const adapters = detectAdapters();
   if (adapters.length === 0) log.warn('no supported agent tools detected on this machine');
-  return { repoRoot, cfg, home: homedir(), adapters };
+  return { repoRoot, cfg, home: homedir(), adapters, ignore: makeIgnoreFn(loadIgnorePatterns(repoRoot)) };
 }
 
 function gh(args: string[]): { ok: boolean; stdout: string } {
@@ -91,13 +93,13 @@ function gh(args: string[]): { ok: boolean; stdout: string } {
 
 // ---------------------------------------------------------------- init
 
-export function cmdInit(opts: { url?: string; path?: string }): void {
+export function cmdSetup(opts: { url?: string; path?: string }): void {
   let url = opts.url;
   if (!url) {
     // No URL given: reuse the standard vault repo if it exists (second+
     // machine), otherwise create it. Never proceed with a public one.
     if (!gh(['--version']).ok) {
-      throw new CssError('no vault URL given and gh is not installed', 'run: chat init --url <private-git-url>');
+      throw new CssError('no vault URL given and gh is not installed', 'run: chat setup --url <private-git-url>');
     }
     const login = gh(['api', 'user', '-q', '.login']);
     if (!login.ok || !login.stdout) throw new CssError('gh is not authenticated', 'gh auth login, or pass --url');
@@ -144,7 +146,7 @@ export function cmdInit(opts: { url?: string; path?: string }): void {
   new Vault(cfg).ensureCloned();
   saveConfig(cfg);
   log.info(`vault ready at ${vaultPath} (device: ${cfg.device})`);
-  log.info('next: run "chat enable" inside a repo you want synced');
+  log.info('next: run "chat init" inside a repo you want synced');
 }
 
 // ---------------------------------------------------------------- enable
@@ -169,7 +171,7 @@ function installGitHooks(root: string): void {
   }
 }
 
-export function cmdEnable(cwd: string, opts: { noHooks?: boolean } = {}): void {
+export function cmdInit(cwd: string, opts: { noHooks?: boolean } = {}): void {
   const cfg = requireConfig();
   const root = requireRepo(cwd);
   const origin = originUrl(root);
@@ -586,8 +588,8 @@ export function cmdSplit(cwd: string, target: string | undefined): void {
   );
 }
 
-export function cmdDuplicate(cwd: string, target: string | undefined): void {
-  if (!target) throw new CssError('duplicate needs a session', 'chat duplicate <session-id|name>');
+export function cmdFork(cwd: string, target: string | undefined): void {
+  if (!target) throw new CssError('fork needs a session', 'chat fork <session-id|name>');
   const cfg = requireConfig();
   const root = requireRepo(cwd);
   const marker = requireEnabled(root);
@@ -596,17 +598,103 @@ export function cmdDuplicate(cwd: string, target: string | undefined): void {
   const originalName = loadProject(cfg, marker) && entryById(loadProject(cfg, marker)!, id)?.name;
 
   const res = duplicateSession(ctx, id);
-  log.info(`duplicated ${id.slice(0, 8)} -> ${res.newSessionId}`);
+  log.info(`forked ${id.slice(0, 8)} -> ${res.newSessionId}`);
   pushSessions(ctx);
   if (originalName) {
     nameNewSessions(
       cfg,
       marker,
-      [{ sessionId: res.newSessionId, base: `${originalName}-copy` }],
+      [{ sessionId: res.newSessionId, base: `${originalName}-fork` }],
       `name(${marker.slug}): ${res.newSessionId.slice(0, 8)} named from ${originalName}`,
     );
   }
-  log.info(`resume the copy: ${res.tool === 'claude' ? `claude --resume ${res.newSessionId}` : `codex resume ${res.newSessionId}`}`);
+  log.info(`resume the fork: chat resume ${res.newSessionId}`);
+}
+
+// ---------------------------------------------------------------- rm / resume / ignore
+
+export function cmdRm(cwd: string, target: string | undefined, opts: { force: boolean }): void {
+  if (!target) throw new CssError('rm needs a session', 'chat rm <session-id|name> [--force]');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+  const id = resolveTarget(cfg, marker, target);
+  const res = rmSession(buildCtx(root, cfg), id, { force: opts.force });
+  if (res.removedLocal > 0) log.info(`removed ${res.removedLocal} local transcript(s)`);
+  if (res.removedVault) {
+    log.info('removed from the vault (recoverable from vault git history)');
+    log.info('note: other devices keep their local copies until they rm too');
+  }
+  log.info(`rm ${id.slice(0, 8)}${res.name ? ` (${res.name})` : ''} done`);
+}
+
+const NESTED_SESSION_ENV = [
+  'CLAUDECODE',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_PID',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_AGENT_SDK_VERSION',
+  'CLAUDE_EFFORT',
+];
+
+export function cmdResume(cwd: string, target: string | undefined): void {
+  if (!target) throw new CssError('resume needs a session', 'chat resume <session-id|name>');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+  const id = resolveTarget(cfg, marker, target);
+  const ctx = buildCtx(root, cfg);
+
+  const find = (): { tool: string; cwd: string } | undefined =>
+    ctx.adapters
+      .map((a) => ({ tool: a.adapter.id, ref: a.adapter.locate(root, a.env).find((r) => r.sessionId === id) }))
+      .filter((x) => x.ref)
+      .map((x) => ({ tool: x.tool, cwd: x.ref!.cwd }))[0];
+
+  let owner = find();
+  if (!owner) {
+    log.info('session not local yet — pulling from the vault…');
+    pullSessions(ctx, id);
+    owner = find();
+  }
+  if (!owner) throw new CssError(`session ${id.slice(0, 8)} not found locally after pull`);
+
+  const [bin, args] =
+    owner.tool === 'claude' ? ['claude', ['--resume', id]] : ['codex', ['resume', id]] as const;
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && !NESTED_SESSION_ENV.includes(k)) env[k] = v;
+  }
+  log.info(`resuming ${id.slice(0, 8)} with ${bin}…`);
+  const res = spawnSync(bin as string, args as string[], { cwd: owner.cwd, stdio: 'inherit', env });
+  process.exitCode = res.status ?? 1;
+}
+
+export function cmdIgnore(cwd: string, target: string | undefined): void {
+  if (!target) throw new CssError('ignore needs a session or pattern', 'chat ignore <session-id|name|glob>');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+  // Resolve to a concrete id when we can, so renames don't un-ignore it;
+  // globs and unknown patterns go in verbatim.
+  let entry = target;
+  if (!target.includes('*')) {
+    try {
+      entry = resolveTarget(cfg, marker, target);
+    } catch {
+      throw new CssError(`"${target}" matches no session`, 'pass a session, a name, or a glob pattern');
+    }
+  }
+  if (appendIgnore(root, entry)) {
+    log.info(`added to ${IGNORE_FILE}: ${entry}`);
+    log.info('this session will no longer sync in either direction on this machine');
+    if (entry !== target) log.info(`(resolved "${target}" to its id so renaming cannot un-ignore it)`);
+    log.warn(`already-synced copies stay in the vault — chat rm removes them`);
+  } else {
+    log.info(`already ignored: ${entry}`);
+  }
 }
 
 export function cmdName(cwd: string, target: string | undefined, newName: string | undefined): void {

@@ -23,6 +23,8 @@ export interface SyncCtx {
   cfg: CssConfig;
   home: string;
   adapters: ActiveAdapter[];
+  /** .chatignore predicate — matching sessions never sync in either direction. */
+  ignore?: (sessionId: string, name?: string) => boolean;
 }
 
 export interface PushResult {
@@ -31,6 +33,7 @@ export interface PushResult {
   upToDate: number;
   remoteAhead: number;
   conflicts: number;
+  ignored: number;
   committed: boolean;
 }
 
@@ -40,6 +43,7 @@ export interface PullResult {
   upToDate: number;
   localAhead: number;
   conflicts: number;
+  ignored: number;
   installedIds: string[];
   updatedIds: string[];
   detail: Record<string, { summary?: string; device: string }>;
@@ -78,6 +82,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
     upToDate: 0,
     remoteAhead: 0,
     conflicts: 0,
+    ignored: 0,
     committed: false,
   };
 
@@ -89,6 +94,10 @@ export function pushSessions(ctx: SyncCtx): PushResult {
     const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
 
     for (const ref of adapter.locate(ctx.repoRoot, env)) {
+      if (ctx.ignore?.(ref.sessionId, tool.sessions[ref.sessionId]?.name)) {
+        result.ignored++;
+        continue;
+      }
       const tokenized = adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx);
       const sha = sha256hex(tokenized);
       const sessionDir = join(projectDir, adapter.id, 'sessions', ref.sessionId);
@@ -187,6 +196,7 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
     upToDate: 0,
     localAhead: 0,
     conflicts: 0,
+    ignored: 0,
     installedIds: [],
     updatedIds: [],
     detail: {},
@@ -203,6 +213,10 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
 
     for (const [sessionId, entry] of Object.entries(tool.sessions)) {
       if (onlyId && sessionId !== onlyId) continue;
+      if (ctx.ignore?.(sessionId, entry.name)) {
+        result.ignored++;
+        continue;
+      }
       const tokenized = readTranscript(join(vault.path, key.dirName, adapter.id, 'sessions', sessionId));
       if (tokenized === null) continue;
 

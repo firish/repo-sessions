@@ -24,8 +24,8 @@ the sessions that built the tool travel with it.
 cd <repo> && npm run build && npm install -g .   # global `chat` FIRST, so hooks embed it
 which chat && chat --version
 chat doctor                       # expect: all ok; note the secret-scan line
-chat init                         # creates/reuses private firish/claude-sessions-vault
-chat enable                       # hooks: installed ×3
+chat setup                        # creates/reuses private firish/claude-sessions-vault
+chat init                         # hooks: installed ×3 + first pull
 chat push                         # first sync — this project's own sessions
 chat list                         # expect rows incl. the session that built css
 ```
@@ -38,8 +38,8 @@ should show a fresh "last push".
 ```sh
 git clone https://github.com/firish/repo-sessions.git && cd repo-sessions
 npm install && npm run build && npm install -g .
-chat doctor && chat init           # MUST say "reusing existing private vault repo"
-chat enable
+chat doctor && chat setup          # MUST say "reusing existing private vault repo"
+chat init
 chat list                         # laptop A's sessions, state=remote
 chat pull                         # first pull is manual (clone predates enable)
 claude --resume <session-id>     # then ask: "what were we working on?"
@@ -60,7 +60,7 @@ laptop A `git pull`, start a claude session in the repo, and expect the
 
 ## Phase 3 — real repos (the gate)
 
-Only after phases 1–2: `chat enable` in one or two real projects. Watch for a
+Only after phases 1–2: `chat init` in one or two real projects. Watch for a
 week. Husky/core.hooksPath repos will refuse hooks with instructions — that is
 expected behavior, not a bug.
 

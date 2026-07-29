@@ -50,13 +50,13 @@ echo "session: $SID"
 
 echo "=== machine A: css push (codex adapter) ==="
 export CSS_CONFIG_DIR="$BASE/config-a"
-$CSS init --url "file://$BASE/vault.git" --path "$BASE/vault-clone-a"
-(cd "$SITE_A" && CSS_CODEX_HOME="$HOME_A" $CSS enable --no-hooks && CSS_CODEX_HOME="$HOME_A" $CSS push)
+$CSS setup --url "file://$BASE/vault.git" --path "$BASE/vault-clone-a"
+(cd "$SITE_A" && CSS_CODEX_HOME="$HOME_A" $CSS init --no-hooks && CSS_CODEX_HOME="$HOME_A" $CSS push)
 
 echo "=== machine B: css pull + codex exec resume ==="
 export CSS_CONFIG_DIR="$BASE/config-b"
-$CSS init --url "file://$BASE/vault.git" --path "$BASE/vault-clone-b"
-(cd "$SITE_B" && CSS_CODEX_HOME="$HOME_B" $CSS enable --no-hooks \
+$CSS setup --url "file://$BASE/vault.git" --path "$BASE/vault-clone-b"
+(cd "$SITE_B" && CSS_CODEX_HOME="$HOME_B" $CSS init --no-hooks \
   && CSS_CODEX_HOME="$HOME_B" $CSS pull && CSS_CODEX_HOME="$HOME_B" $CSS list)
 
 ANSWER=$(cd "$SITE_B" && CODEX_HOME="$HOME_B" "$CODEX" exec resume "$SID" \
