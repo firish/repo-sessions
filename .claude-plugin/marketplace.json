@@ -1,0 +1,24 @@
+{
+  "name": "repo-sessions",
+  "owner": {
+    "name": "Rishi Gulati",
+    "url": "https://github.com/firish"
+  },
+  "metadata": {
+    "description": "Sessions and project memory that follow your repo — git-native sync for Claude Code (and Codex) through a private vault you own.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "repo-sessions",
+      "source": "./plugin",
+      "description": "Auto-sync Claude Code sessions + project memory via your private vault: SessionStart pulls (and warns on stale resumes), SessionEnd/Stop push in the background, /sessions wraps the chat CLI. Requires `npm i -g repo-sessions`.",
+      "author": {
+        "name": "Rishi Gulati"
+      },
+      "homepage": "https://github.com/firish/repo-sessions",
+      "license": "MIT",
+      "keywords": ["sessions", "sync", "resume", "memory", "git"]
+    }
+  ]
+}

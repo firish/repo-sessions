@@ -1,7 +1,7 @@
 {
   "name": "repo-sessions",
   "version": "0.1.0",
-  "description": "Your Claude Code and Codex conversations follow your repo, not your laptop. Git-native session sync via a private vault.",
+  "description": "Your Claude Code and Codex sessions follow your repo, not your laptop. Git-native session + project-memory sync through a private vault you own — riding the git push/pull you already make.",
   "type": "module",
   "bin": {
     "chat": "dist/cli.js",
@@ -16,14 +16,29 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "tsc && vitest run"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firish/repo-sessions.git"
+  },
+  "homepage": "https://github.com/firish/repo-sessions#readme",
+  "bugs": {
+    "url": "https://github.com/firish/repo-sessions/issues"
+  },
+  "author": "Rishi Gulati",
   "keywords": [
     "claude-code",
+    "claude",
     "codex",
     "sessions",
+    "session-sync",
+    "resume",
     "sync",
-    "git"
+    "git",
+    "ai-agents",
+    "cli"
   ],
   "license": "MIT",
   "devDependencies": {
