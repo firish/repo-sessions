@@ -42,7 +42,7 @@ export function rmSession(ctx: SyncCtx, sessionId: string, opts: { force?: boole
         projectRoot: ctx.repoRoot,
         home: ctx.home,
         toolDataDir: a.env.dataDir,
-      });
+      }, { json: true });
       if (!entry || sha256hex(tok) !== entry.sha256) {
         throw new CssError(
           `local copy of ${sessionId.slice(0, 8)} has turns the vault does not (or was never synced)`,

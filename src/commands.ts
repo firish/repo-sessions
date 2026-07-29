@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detectAdapters } from './adapters/registry.js';
-import { CssError, isPrefixOf, log, nowIso, sha256hex } from './engine/common.js';
+import { CssError, isPrefixOf, log, normalizeEol, nowIso, sha256hex } from './engine/common.js';
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
 import { pruneVault } from './engine/gc.js';
@@ -461,7 +461,7 @@ function collectRows(ctx: SyncCtx): Row[] {
         projectRoot: ctx.repoRoot,
         home: ctx.home,
         toolDataDir: env.dataDir,
-      });
+      }, { json: true });
       let state: Row['state'];
       if (sha256hex(localTok) === entry.sha256) state = 'synced';
       else {
@@ -835,7 +835,7 @@ function collectMemoryRows(ctx: SyncCtx, project: ProjectEntry | undefined): Mem
       locals.delete(file);
       let state: MemoryRow['state'] = 'remote-only';
       if (local) {
-        const tok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx);
+        const tok = normalizeEol(adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx));
         state = sha256hex(tok) === entry.sha256 ? 'synced' : local.mtimeMs > entry.mtimeMs ? 'ahead' : 'behind';
       }
       rows.push({ file, tool: adapter.id, state, device: entry.device, mtimeMs: entry.mtimeMs });

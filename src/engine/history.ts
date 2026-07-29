@@ -136,7 +136,7 @@ export function restoreSession(ctx: SyncCtx, sessionId: string, opts: { at?: str
     const target = active.adapter.installPath({ sessionId, cwd, relPath: entry.relPath }, active.env);
     if (!existsSync(target)) {
       mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, active.adapter.rehydrate(hist.transcriptTok, pathCtx));
+      writeFileSync(target, active.adapter.rehydrate(hist.transcriptTok, pathCtx, { json: true }));
       result.installedAt = target;
     }
   }
@@ -170,6 +170,6 @@ export function forkSessionAt(ctx: SyncCtx, sessionId: string, at?: string): For
   const relPath = hist.meta?.relPath?.replaceAll(sessionId, newSessionId);
   const target = active.adapter.installPath({ sessionId: newSessionId, cwd, relPath }, active.env);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, active.adapter.rehydrate(content, pathCtx));
+  writeFileSync(target, active.adapter.rehydrate(content, pathCtx, { json: true }));
   return { newSessionId, targetPath: target, toolId: hist.toolId, hash: hist.hash };
 }

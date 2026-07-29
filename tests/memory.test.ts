@@ -93,6 +93,21 @@ describe('project memory sync', () => {
     expect(readFileSync(join(memA, 'facts.md'), 'utf8')).toBe('v2 from B\n');
   });
 
+  it('a CRLF copy of identical content is not an overwrite (autocrlf false positive)', () => {
+    const { ctxA, ctxB, memA, memB } = rig();
+    writeFileSync(join(memA, 'facts.md'), 'line one\nline two\n');
+    pushSessions(ctxA);
+    pullSessions(ctxB);
+
+    // Simulate a Windows autocrlf checkout landing on B: same content, CRLF,
+    // fresh mtime. Must sync as "unchanged", never as an overwrite of A.
+    writeFileSync(join(memB, 'facts.md'), 'line one\r\nline two\r\n');
+    utimesSync(join(memB, 'facts.md'), new Date(), new Date(Date.now() + 60_000));
+    expect(pushSessions(ctxB).memoryPushed).toBe(0);
+    expect(pullSessions(ctxA).memoryInstalled).toBe(0);
+    expect(readFileSync(join(memA, 'facts.md'), 'utf8')).toBe('line one\nline two\n');
+  });
+
   it('memory does not exist -> everything is a no-op', () => {
     const { ctxB } = rig();
     expect(existsSync(join(ctxB.repoRoot, 'nonexistent'))).toBe(false);

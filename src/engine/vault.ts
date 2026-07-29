@@ -56,12 +56,26 @@ export class Vault {
   }
 
   ensureCloned(): void {
-    if (existsSync(join(this.path, '.git'))) return;
+    if (existsSync(join(this.path, '.git'))) {
+      this.ensureAttributes();
+      return;
+    }
     mkdirSync(dirname(this.path), { recursive: true });
     const res = git(['clone', '--quiet', this.cfg.vaultUrl, this.path], { allowFail: true, timeoutMs: 60_000 });
     if (!res.ok) {
       throw new CssError(`could not clone vault from ${this.cfg.vaultUrl}`, res.stderr);
     }
+    this.ensureAttributes();
+  }
+
+  /** The vault is a data store, not source code: `* -text` disables git's
+   *  EOL conversion so Windows core.autocrlf can never rewrite LF content to
+   *  CRLF on checkout (which read as phantom memory-file changes). Committed
+   *  with the next sync. */
+  private ensureAttributes(): void {
+    const attrs = join(this.path, '.gitattributes');
+    if (existsSync(attrs)) return;
+    writeFileSync(attrs, '* -text\n');
   }
 
   /** Bring the local clone up to date. Throws CssError when the remote is

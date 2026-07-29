@@ -27,6 +27,13 @@ export function sha256hex(data: string | Buffer): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
+/** CRLF -> LF. Vault content is LF-canonical; Windows git checkouts
+ *  (core.autocrlf) reintroduce CRLF, which must never read as a content
+ *  change — it caused false "overwriting X's version" memory warnings. */
+export function normalizeEol(s: string): string {
+  return s.replaceAll('\r\n', '\n');
+}
+
 /** True when `shorter` is a strict or equal prefix of `longer`. Transcripts are
  *  append-only, so prefix relations decide fast-forward vs conflict. */
 export function isPrefixOf(shorter: string, longer: string): boolean {

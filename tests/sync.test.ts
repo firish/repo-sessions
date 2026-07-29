@@ -81,7 +81,7 @@ describe('two-device vault round-trip', () => {
     const fileB = join(ctxB.adapters[0]!.env.dataDir, mungeCurrent(siteB), `${FIXTURE_SID}.jsonl`);
     expect(existsSync(fileB)).toBe(true);
     const contentB = readFileSync(fileB, 'utf8');
-    expect(contentB).toContain(`"cwd":"${siteB}"`);
+    expect(contentB).toContain(`"cwd":${JSON.stringify(siteB)}`);
     expect(contentB).not.toContain(siteA);
     expect(contentB).not.toContain('${CSS_');
 
@@ -97,7 +97,7 @@ describe('two-device vault round-trip', () => {
     const fileA = join(ctxA.adapters[0]!.env.dataDir, mungeCurrent(siteA), `${FIXTURE_SID}.jsonl`);
     const contentA = readFileSync(fileA, 'utf8');
     expect(contentA).toContain('continued on laptop B');
-    expect(contentA).toContain(`"cwd":"${siteA}"`);
+    expect(contentA).toContain(`"cwd":${JSON.stringify(siteA)}`);
     expect(contentA).not.toContain(siteB);
 
     // --- steady state: nothing to do
@@ -143,6 +143,6 @@ describe('two-device vault round-trip', () => {
     const subCwdB = join(siteB, 'blog');
     const installed = join(ctxB.adapters[0]!.env.dataDir, mungeCurrent(subCwdB), `${subSid}.jsonl`);
     expect(existsSync(installed)).toBe(true);
-    expect(readFileSync(installed, 'utf8')).toContain(`"cwd":"${subCwdB}"`);
+    expect(readFileSync(installed, 'utf8')).toContain(`"cwd":${JSON.stringify(subCwdB)}`);
   });
 });

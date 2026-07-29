@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ActiveAdapter } from '../adapters/registry.js';
 import type { PathCtx } from '../adapters/types.js';
-import { isPrefixOf, log, nowIso, sha256hex } from './common.js';
+import { isPrefixOf, log, normalizeEol, nowIso, sha256hex } from './common.js';
 import type { CssConfig } from './config.js';
 import { originUrl } from './git.js';
 import { CssError } from './common.js';
@@ -102,7 +102,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
         result.ignored++;
         continue;
       }
-      const tokenized = adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx);
+      const tokenized = adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx, { json: true });
       const sha = sha256hex(tokenized);
       const sessionDir = join(projectDir, adapter.id, 'sessions', ref.sessionId);
       const existing = readTranscript(sessionDir);
@@ -179,10 +179,22 @@ export function pushSessions(ctx: SyncCtx): PushResult {
     const memDir = join(projectDir, adapter.id, 'memory');
 
     for (const ref of adapter.locateMemory(ctx.repoRoot, env)) {
-      const tok = adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx);
+      const tok = normalizeEol(adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx));
       const sha = sha256hex(tok);
       const entry = memIndex[ref.fileName];
       if (entry && entry.sha256 === sha) continue; // unchanged
+      // A stale index sha (pre-EOL-normalization pushes) must not read as a
+      // content change: when the bytes already agree, heal the entry silently —
+      // never warn about "overwriting" identical content.
+      const vaultFile = join(memDir, ref.fileName);
+      if (existsSync(vaultFile) && normalizeEol(readFileSync(vaultFile, 'utf8')) === tok) {
+        memIndex[ref.fileName] = {
+          ...(entry ?? { mtimeMs: ref.mtimeMs, device: ctx.cfg.device, syncedAt: nowIso() }),
+          sha256: sha,
+          byteLen: Buffer.byteLength(tok),
+        };
+        continue;
+      }
       if (entry && entry.mtimeMs > ref.mtimeMs) continue; // vault is newer; pull resolves
       if (entry && entry.device !== ctx.cfg.device) {
         log.warn(`memory ${ref.fileName}: overwriting ${entry.device}'s version (previous state stays in vault history)`);
@@ -264,18 +276,18 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
         const cwd = adapter.rehydrate(entry.cwdTok, pathCtx);
         const target = adapter.installPath({ sessionId, cwd, relPath: entry.relPath }, env);
         mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, adapter.rehydrate(tokenized, pathCtx));
+        writeFileSync(target, adapter.rehydrate(tokenized, pathCtx, { json: true }));
         result.installed++;
         result.installedIds.push(sessionId);
         result.detail[sessionId] = { summary: entry.summary, device: entry.device };
         continue;
       }
 
-      const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx);
+      const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx, { json: true });
       if (localTok === tokenized) {
         result.upToDate++;
       } else if (isPrefixOf(localTok, tokenized)) {
-        writeFileSync(local.filePath, adapter.rehydrate(tokenized, pathCtx));
+        writeFileSync(local.filePath, adapter.rehydrate(tokenized, pathCtx, { json: true }));
         result.fastForwarded++;
         result.updatedIds.push(sessionId);
         result.detail[sessionId] = { summary: entry.summary, device: entry.device };
@@ -301,7 +313,7 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
     for (const [fileName, entry] of Object.entries(memIndex)) {
       const vaultFile = join(vault.path, key.dirName, adapter.id, 'memory', fileName);
       if (!existsSync(vaultFile)) continue;
-      const tok = readFileSync(vaultFile, 'utf8');
+      const tok = normalizeEol(readFileSync(vaultFile, 'utf8'));
       const local = localByName.get(fileName);
 
       if (!local) {
@@ -311,7 +323,7 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
         result.memoryInstalled++;
         continue;
       }
-      const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx);
+      const localTok = normalizeEol(adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx));
       if (localTok === tok) continue;
       if (entry.mtimeMs > local.mtimeMs) {
         log.warn(`memory ${fileName}: replaced by newer version from ${entry.device} (previous state stays in vault history)`);

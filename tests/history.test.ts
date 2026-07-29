@@ -70,7 +70,7 @@ describe('vault time travel', () => {
     expect(content).toContain(fork.newSessionId);
     expect(content).not.toContain(FIXTURE_SID);
     expect(content).not.toContain('turn after v1');
-    expect(content).toContain(`"cwd":"${ctx.repoRoot}"`); // rehydrated for this machine
+    expect(content).toContain(`"cwd":${JSON.stringify(ctx.repoRoot)}`); // rehydrated for this machine
 
     // fork with no --at takes the newest state (including the later turn)
     const forkNow = forkSessionAt(ctx, FIXTURE_SID);

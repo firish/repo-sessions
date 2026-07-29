@@ -116,14 +116,14 @@ describe('mergeSession (integration)', () => {
     // B's local file got the merged transcript, rehydrated for B
     const localB = readFileSync(fileB, 'utf8');
     expect(localB).toContain('divergent turn on A');
-    expect(localB).toContain(`"cwd":"${siteB}"`);
+    expect(localB).toContain(`"cwd":${JSON.stringify(siteB)}`);
 
     // A simply fast-forwards on next pull — its copy was the merge trunk
     const pullA = pullSessions(ctxA);
     expect(pullA.fastForwarded).toBe(1);
     const localA = readFileSync(fileA, 'utf8');
     expect(localA).toContain('divergent turn on B');
-    expect(localA).toContain(`"cwd":"${siteA}"`);
+    expect(localA).toContain(`"cwd":${JSON.stringify(siteA)}`);
     expect(localA).not.toContain(siteB);
   });
 

@@ -232,11 +232,12 @@ export function splitBranches(
     if (seen.has(c.content) || isPrefixOf(c.content, canonical)) continue; // dupe or nothing beyond the vault
     seen.add(c.content);
     const { content, newSessionId } = duplicateContent(c.content, originalRef.sessionId);
-    const hydrated = active.adapter.rehydrate(content, pathCtx);
+    const hydrated = active.adapter.rehydrate(content, pathCtx, { json: true });
     const target = active.adapter.installPath(
       { sessionId: newSessionId, cwd: originalRef.cwd, relPath: originalRef.relPath?.replaceAll(originalRef.sessionId, newSessionId) },
       active.env,
     );
+    mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, hydrated);
     out.push({ device: c.device, newSessionId, targetPath: target });
   }
@@ -278,7 +279,7 @@ export function mergeSession(ctx: SyncCtx, sessionId: string, opts: { split?: bo
   const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: active.env.dataDir };
   const sessionDir = join(vault.path, key.dirName, active.adapter.id, 'sessions', sessionId);
   const localRef = active.adapter.locate(ctx.repoRoot, active.env).find((r) => r.sessionId === sessionId);
-  const localTok = localRef ? active.adapter.tokenize(readFileSync(localRef.filePath, 'utf8'), pathCtx) : null;
+  const localTok = localRef ? active.adapter.tokenize(readFileSync(localRef.filePath, 'utf8'), pathCtx, { json: true }) : null;
   const sources = collectSources(sessionDir, localTok);
   const cwdForInstall = localRef?.cwd ?? active.adapter.rehydrate(entry.cwdTok, pathCtx);
 
@@ -299,7 +300,7 @@ export function mergeSession(ctx: SyncCtx, sessionId: string, opts: { split?: bo
     // now live under the new session id.
     let localReset = false;
     if (localRef && localTok !== null && localTok !== sources.canonicalTok && !isPrefixOf(localTok, sources.canonicalTok)) {
-      writeFileSync(localRef.filePath, active.adapter.rehydrate(sources.canonicalTok, pathCtx));
+      writeFileSync(localRef.filePath, active.adapter.rehydrate(sources.canonicalTok, pathCtx, { json: true }));
       localReset = true;
     }
     return { mode: 'split', splits, localReset };
@@ -318,7 +319,7 @@ export function mergeSession(ctx: SyncCtx, sessionId: string, opts: { split?: bo
     localRef?.filePath ??
     active.adapter.installPath({ sessionId, cwd: cwdForInstall, relPath: entry.relPath }, active.env);
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, active.adapter.rehydrate(outcome.mergedTok, pathCtx));
+  writeFileSync(target, active.adapter.rehydrate(outcome.mergedTok, pathCtx, { json: true }));
   return { mode: 'merge', outcome, installedAt: target };
 }
 
