@@ -119,6 +119,7 @@ this tool exists to close.
 | "Always allow" rules (`.claude/settings.local.json`) | nothing today | v1.1: opt-in sync of `permissions` keys only — never `env` |
 | Global config (`~/.claude/*`, user-scope MCP servers) | dotfiles managers | machine state, not project state — out of scope by design |
 | Local-scope MCP servers (`~/.claude.json`) | nothing, on purpose | local-scope *is* the choice not to share; promote to `.mcp.json` to travel |
+| Session scratchpad (OS temp) | nothing, by design | ephemeral per-session workspace; resume needs the transcript, not the workspace — artifacts that matter belong in the repo |
 
 ## Claude Code plugin (`plugin/`)
 
