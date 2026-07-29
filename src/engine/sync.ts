@@ -40,9 +40,12 @@ export interface PullResult {
   upToDate: number;
   localAhead: number;
   conflicts: number;
+  installedIds: string[];
+  updatedIds: string[];
+  detail: Record<string, { summary?: string; device: string }>;
 }
 
-function repoKey(ctx: SyncCtx): RepoKey {
+export function resolveRepoKey(ctx: SyncCtx): RepoKey {
   const origin = originUrl(ctx.repoRoot);
   if (!origin) {
     throw new CssError(
@@ -66,7 +69,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
   vault.ensureCloned();
   vault.refresh();
 
-  const key = repoKey(ctx);
+  const key = resolveRepoKey(ctx);
   const index = vault.loadIndex();
   const project = ensureProject(index, key);
   const result: PushResult = {
@@ -174,10 +177,19 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
   vault.ensureCloned();
   vault.refresh();
 
-  const key = repoKey(ctx);
+  const key = resolveRepoKey(ctx);
   const index = vault.loadIndex();
   const project = index.projects[key.dirName];
-  const result: PullResult = { installed: 0, fastForwarded: 0, upToDate: 0, localAhead: 0, conflicts: 0 };
+  const result: PullResult = {
+    installed: 0,
+    fastForwarded: 0,
+    upToDate: 0,
+    localAhead: 0,
+    conflicts: 0,
+    installedIds: [],
+    updatedIds: [],
+    detail: {},
+  };
   if (!project) return result;
 
   for (const { adapter, env } of ctx.adapters) {
@@ -200,6 +212,8 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, adapter.rehydrate(tokenized, pathCtx));
         result.installed++;
+        result.installedIds.push(sessionId);
+        result.detail[sessionId] = { summary: entry.summary, device: entry.device };
         continue;
       }
 
@@ -209,6 +223,8 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
       } else if (isPrefixOf(localTok, tokenized)) {
         writeFileSync(local.filePath, adapter.rehydrate(tokenized, pathCtx));
         result.fastForwarded++;
+        result.updatedIds.push(sessionId);
+        result.detail[sessionId] = { summary: entry.summary, device: entry.device };
       } else if (isPrefixOf(tokenized, localTok)) {
         result.localAhead++; // we have unsynced turns; next push fast-forwards the vault
       } else {

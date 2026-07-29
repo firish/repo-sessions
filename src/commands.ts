@@ -7,6 +7,7 @@ import { CssError, isPrefixOf, log, nowIso, sha256hex } from './engine/common.js
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
 import { pruneVault } from './engine/gc.js';
+import { duplicateSession, mergeSession, summarizeMerge } from './engine/merge.js';
 import { absoluteCssInvocation, customHooksPath, hookStatus, installHooks, uninstallHooks } from './engine/hooks.js';
 import { repoKeyFromOrigin } from './engine/repoKey.js';
 import { describeFindings, scanSecrets } from './engine/secrets.js';
@@ -155,13 +156,25 @@ export function cmdEnable(cwd: string, opts: { noHooks?: boolean } = {}): void {
   const vault = new Vault(cfg);
   vault.ensureCloned();
   vault.refresh();
-  writeMarker(root, { dirName: key.dirName, slug: key.slug, origin: key.normalized, enabledAt: nowIso() });
+  const marker: Marker = { dirName: key.dirName, slug: key.slug, origin: key.normalized, enabledAt: nowIso() };
+  writeMarker(root, marker);
   log.info(`enabled: ${key.slug} -> vault namespace ${key.dirName}`);
   if (opts.noHooks) {
     log.info('hooks skipped (--no-hooks) — sync manually with css push / css pull');
   } else {
     installGitHooks(root);
     log.info('sessions now ride git push / git pull on this repo');
+  }
+  // First pull right away — a fresh clone should be resume-ready after enable.
+  try {
+    const res = pullSessions(buildCtx(root, cfg));
+    marker.lastPull = nowIso();
+    writeMarker(root, marker);
+    if (res.installed + res.fastForwarded > 0) {
+      log.info(`pulled ${res.installed + res.fastForwarded} session(s) from the vault`);
+    }
+  } catch {
+    log.warn('initial pull skipped (vault unreachable) — run css pull later');
   }
 }
 
@@ -248,8 +261,19 @@ function spawnBackgroundPush(root: string): void {
   spawn(process.execPath, [cli, 'push', '-q'], { cwd: root, detached: true, stdio: 'ignore' }).unref();
 }
 
-const STOP_DEBOUNCE_MS = 10 * 60 * 1000;
+const DEFAULT_STOP_DEBOUNCE_MIN = 2;
 const ATTEMPT_COOLDOWN_MS = 2 * 60 * 1000;
+
+/** Claude Code hook payload arrives on stdin; tolerate manual invocations. */
+function readHookStdin(): { session_id?: string; source?: string } {
+  try {
+    if (process.stdin.isTTY) return {};
+    const raw = readFileSync(0, 'utf8');
+    return raw.trim() ? (JSON.parse(raw) as { session_id?: string; source?: string }) : {};
+  } catch {
+    return {};
+  }
+}
 
 export function cmdHook(cwd: string, kind: string | undefined): void {
   const ctx = hookContext(cwd);
@@ -258,18 +282,34 @@ export function cmdHook(cwd: string, kind: string | undefined): void {
   switch (kind) {
     case 'session-start': {
       // Pull before the session begins; surface a notice only when something arrived.
+      const payload = readHookStdin();
       try {
         const res = pullSessions(buildCtx(ctx.root, ctx.cfg));
         ctx.marker.lastPull = nowIso();
         writeMarker(ctx.root, ctx.marker);
-        const n = res.installed + res.fastForwarded;
-        if (n > 0) {
+
+        const parts: string[] = [];
+        // The dangerous case first: THIS session was resumed while another
+        // device had pushed newer turns — the just-pulled file is ahead of
+        // what Claude loaded into context.
+        if (payload.session_id && res.updatedIds.includes(payload.session_id)) {
+          parts.push(
+            'repo-sessions WARNING: this session has newer turns from another device that were just pulled — the context you resumed is a stale snapshot. Tell the user to exit and resume again to include them (continuing here will fork the transcript; css merge can reconcile later).',
+          );
+        }
+        const otherIds = [...res.installedIds, ...res.updatedIds].filter((id) => id !== payload.session_id);
+        if (otherIds.length > 0) {
+          const first = otherIds[0];
+          const summary = first ? res.detail[first]?.summary : undefined;
+          const label = summary ? `"${summary.slice(0, 40)}…" (${first?.slice(0, 8)})` : `${otherIds.length} session(s)`;
+          parts.push(
+            `repo-sessions: synced ${label}${otherIds.length > 1 ? ` and ${otherIds.length - 1} more` : ''} from other devices — /sessions list to browse, claude --resume <id> to continue one.`,
+          );
+        }
+        if (parts.length > 0) {
           console.log(
             JSON.stringify({
-              hookSpecificOutput: {
-                hookEventName: 'SessionStart',
-                additionalContext: `repo-sessions: ${n} session(s) synced from other devices for this repo — /sessions list to browse, claude --resume <id> to continue one.`,
-              },
+              hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: parts.join('\n') },
             }),
           );
         }
@@ -284,12 +324,14 @@ export function cmdHook(cwd: string, kind: string | undefined): void {
     }
     case 'stop': {
       // Fires after every response — must be near-free. Debounce on last
-      // successful push, with a cooldown on attempts so an unreachable vault
-      // does not cause a spawn storm.
+      // successful push; the attempt cooldown only bites while an attempt is
+      // outstanding (vault down), so debounce 0 really means every response.
+      const debounceMs = (ctx.cfg.stopDebounceMinutes ?? DEFAULT_STOP_DEBOUNCE_MIN) * 60 * 1000;
       const now = Date.now();
       const last = ctx.marker.lastPush ? Date.parse(ctx.marker.lastPush) : 0;
       const attempt = ctx.marker.lastAttemptAt ? Date.parse(ctx.marker.lastAttemptAt) : 0;
-      if (now - last < STOP_DEBOUNCE_MS || now - attempt < ATTEMPT_COOLDOWN_MS) return;
+      const attemptPending = attempt > last && now - attempt < ATTEMPT_COOLDOWN_MS;
+      if (now - last < debounceMs || attemptPending) return;
       ctx.marker.lastAttemptAt = nowIso();
       writeMarker(ctx.root, ctx.marker);
       spawnBackgroundPush(ctx.root);
@@ -452,6 +494,36 @@ export function cmdStatus(cwd: string): void {
     `sessions: ${rows.length} total — ${count('synced')} synced, ${count('unsynced')} unsynced, ` +
       `${count('ahead')} ahead, ${count('behind')} behind, ${count('remote')} remote-only, ${count('diverged')} diverged`,
   );
+}
+
+// ---------------------------------------------------------------- merge / duplicate
+
+export function cmdMerge(cwd: string, id: string | undefined, opts: { split: boolean }): void {
+  if (!id) throw new CssError('merge needs a session id', 'css merge <session-id> [--split]');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  requireEnabled(root);
+  const res = mergeSession(buildCtx(root, cfg), id, { split: opts.split });
+  if (res.mode === 'split') {
+    for (const s of res.splits ?? []) {
+      log.info(`split ${s.device} -> new session ${s.newSessionId}`);
+    }
+    if (res.localReset) log.info(`local ${id.slice(0, 8)} reset to the vault transcript (your divergent turns live in the new session)`);
+    log.info('new sessions sync to the vault on next push');
+    return;
+  }
+  if (res.outcome) summarizeMerge(res.outcome, id);
+  log.info(`merged transcript installed locally — resume with the same id`);
+}
+
+export function cmdDuplicate(cwd: string, id: string | undefined): void {
+  if (!id) throw new CssError('duplicate needs a session id', 'css duplicate <session-id>');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const res = duplicateSession(buildCtx(root, cfg), id);
+  log.info(`duplicated ${id.slice(0, 8)} -> ${res.newSessionId}`);
+  log.info(`resume the copy: ${res.tool === 'claude' ? `claude --resume ${res.newSessionId}` : `codex resume ${res.newSessionId}`}`);
+  log.info('it syncs to the vault on next push');
 }
 
 // ---------------------------------------------------------------- gc

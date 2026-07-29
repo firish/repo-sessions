@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmdDisable, cmdDoctor, cmdEnable, cmdGc, cmdHook, cmdHooks, cmdInit, cmdList, cmdPull, cmdPush, cmdStatus } from './commands.js';
+import { cmdDisable, cmdDoctor, cmdDuplicate, cmdEnable, cmdGc, cmdHook, cmdHooks, cmdInit, cmdList, cmdMerge, cmdPull, cmdPush, cmdStatus } from './commands.js';
 import { CssError, log } from './engine/common.js';
 
-const HELP = `css — repo-scoped session sync for Claude Code (and soon Codex)
+const HELP = `css — repo-scoped session sync for Claude Code and Codex
 
 usage:
   css init [--url <git-url>] [--path <dir>]   one-time machine setup (private vault)
@@ -14,6 +14,9 @@ usage:
   css pull [-q] [--id <session-id>]           vault sessions -> local
   css list                                    sessions for this repo
   css status                                  sync state, conflicts, reachability
+  css merge <session-id> [--split]            reconcile a diverged session (splice tails;
+                                              --split keeps branches as separate sessions)
+  css duplicate <session-id>                  fork a session into a new id
   css hooks [install|uninstall|status]        manage the git hooks for this repo
   css gc --keep <n> --days <n>                prune old sessions from the vault
   css doctor [--verify <session-id>]          environment checks, secret scan, resume canary
@@ -24,6 +27,7 @@ usage:
 interface Flags {
   quiet: boolean;
   noHooks: boolean;
+  split: boolean;
   url?: string;
   path?: string;
   id?: string;
@@ -33,7 +37,7 @@ interface Flags {
 }
 
 function parseFlags(args: string[]): Flags {
-  const flags: Flags = { quiet: false, noHooks: false };
+  const flags: Flags = { quiet: false, noHooks: false, split: false };
   const num = (v: string | undefined, flag: string): number => {
     const n = Number(v);
     if (!Number.isInteger(n) || n < 0) throw new CssError(`${flag} needs a non-negative integer`);
@@ -49,6 +53,7 @@ function parseFlags(args: string[]): Flags {
     else if (a === '--verify') flags.verify = args[++i];
     else if (a === '--keep') flags.keep = num(args[++i], '--keep');
     else if (a === '--days') flags.days = num(args[++i], '--days');
+    else if (a === '--split') flags.split = true;
     else throw new CssError(`unknown argument: ${a}`, 'run css help');
   }
   return flags;
@@ -70,9 +75,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // subcommand-style verbs take a bare word before flags
+  // subcommand-style verbs take a bare word (action or session id) before flags
   let sub: string | undefined;
-  if ((cmd === 'hooks' || cmd === 'hook') && rest[0] && !rest[0].startsWith('-')) {
+  if ((cmd === 'hooks' || cmd === 'hook' || cmd === 'merge' || cmd === 'duplicate') && rest[0] && !rest[0].startsWith('-')) {
     sub = rest.shift();
   }
 
@@ -109,6 +114,12 @@ async function main(): Promise<void> {
       break;
     case 'gc':
       cmdGc({ keep: flags.keep, days: flags.days });
+      break;
+    case 'merge':
+      cmdMerge(cwd, sub, { split: flags.split });
+      break;
+    case 'duplicate':
+      cmdDuplicate(cwd, sub);
       break;
     case 'doctor':
       await cmdDoctor(cwd, { verify: flags.verify });

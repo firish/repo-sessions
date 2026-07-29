@@ -6,6 +6,9 @@ export interface CssConfig {
   vaultUrl: string;
   vaultPath: string;
   device: string;
+  /** Stop-hook push debounce in minutes. Default 2; 0 = push after every
+   *  response. Small values make lid-close laptop-hopping near-lossless. */
+  stopDebounceMinutes?: number;
 }
 
 /** CSS_CONFIG_DIR override exists for tests and the e2e harness, which

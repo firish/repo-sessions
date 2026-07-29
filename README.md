@@ -44,6 +44,27 @@ Existing hooks (including husky-style `core.hooksPath` setups) are respected:
 foreign hooks are chain-loaded and run first with their stdin/argv intact —
 their failure still aborts the git operation; css never does.
 
+## Working from any laptop
+
+Sequential use (one laptop at a time) never diverges as long as syncs are
+tight: SessionEnd pushes immediately, the Stop hook pushes at most
+`stopDebounceMinutes` (config.json; default 2, `0` = every response) behind
+your last message, and SessionStart/`css enable` pull before you resume.
+When divergence does happen — you resumed on B before A's tail pushed —
+nothing is lost and two commands reconcile:
+
+- `css merge <id>` splices the divergent tails into one transcript
+  ("meanwhile, on the other laptop"), re-parenting the seam so every turn
+  replays. All devices converge on the merged transcript on their next pull.
+- `css merge <id> --split` (also what merge recommends when a tail contains a
+  compaction boundary, which cannot be safely spliced): the divergent branch
+  becomes its own new session, the old id converges on the vault transcript.
+- `css duplicate <id>` forks any session into a new id — useful before
+  experiments, or to deliberately branch work per machine.
+
+If you resume a stale snapshot, the SessionStart hook warns *inside the
+session* that newer turns were just pulled and how to pick them up.
+
 ## Claude Code plugin (`plugin/`)
 
 SessionStart pulls newer sessions and surfaces a one-line notice inside
