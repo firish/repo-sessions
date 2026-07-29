@@ -1,5 +1,16 @@
 # Dogfood protocol — two real laptops
 
+## Results log
+
+- **2026-07-28 — Phase 1 PASS, both laptops.** Init auto-created then reused
+  the private vault; hooks fired on plain git push/pull; `claude --resume` on
+  laptop B recovered the project session with an accurate recap (via CC's
+  compacted-resume flow — the session was ~400k tokens). Notes: exactly 1
+  session synced, which is correct (all spike/e2e sessions live in scratchpad
+  fixture namespaces, not this repo's); the resumed session was still live on
+  laptop A, so a divergence conflict copy is expected on next sync — designed
+  behavior, no turns lost. Phase 3 (real repos) is unblocked.
+
 Goal: prove on real hardware what the e2e proves in simulation, then (and only
 then) turn hooks on for real repos. This repo is itself the first sync target —
 the sessions that built the tool travel with it.
