@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmdDisable, cmdDoctor, cmdFork, cmdGc, cmdHook, cmdHooks, cmdIgnore, cmdInit, cmdList, cmdName, cmdOpen, cmdPull, cmdPush, cmdRebase, cmdRestore, cmdResume, cmdRm, cmdSetup, cmdSplit, cmdStatus } from './commands.js';
+import { cmdDisable, cmdDoctor, cmdFork, cmdGc, cmdHook, cmdHooks, cmdIgnore, cmdInit, cmdList, cmdMemory, cmdName, cmdOpen, cmdPull, cmdPush, cmdRebase, cmdRestore, cmdResume, cmdRm, cmdSetup, cmdSplit, cmdStatus } from './commands.js';
 import { CssError, log } from './engine/common.js';
 
 const HELP = `chat — your agent sessions follow your repo (Claude Code + Codex)
@@ -14,6 +14,7 @@ usage:
   chat pull [-q] [--id <session|name>]        vault sessions -> local
   chat list                                   sessions for this repo
   chat status                                 sync state, conflicts, reachability
+  chat memory                                 project-memory sync state (syncs automatically)
   chat resume <session|name>                  resume a session (pulls it first if needed)
   chat name <session|name> <new-name>         name a session (names sync via the vault)
   chat rebase <session|name>                  reconcile a diverged session (replay tails onto trunk)
@@ -124,6 +125,9 @@ async function main(): Promise<void> {
       break;
     case 'status':
       cmdStatus(cwd);
+      break;
+    case 'memory':
+      cmdMemory(cwd);
       break;
     case 'gc':
       cmdGc({ keep: flags.keep, days: flags.days });

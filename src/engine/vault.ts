@@ -25,10 +25,20 @@ export interface SessionEntry {
   name?: string;
 }
 
+/** Memory files are mutable markdown — no append-only structure, so sync is
+ *  newest-mtime-wins per file, with vault git history as the undo. */
+export interface MemoryEntry {
+  sha256: string;
+  byteLen: number;
+  mtimeMs: number;
+  device: string;
+  syncedAt: string;
+}
+
 export interface ProjectEntry {
   slug: string;
   origin: string;
-  tools: Record<string, { sessions: Record<string, SessionEntry> }>;
+  tools: Record<string, { sessions: Record<string, SessionEntry>; memory?: Record<string, MemoryEntry> }>;
 }
 
 export interface VaultIndex {

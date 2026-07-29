@@ -26,6 +26,7 @@ the npm bin shadows it on PATH order; the alias is the fallback.
 | | Claude Code | Codex |
 |---|---|---|
 | Sessions synced | CLI + VS Code extension (same store) | CLI + VS Code extension (same store) |
+| Project memory | synced automatically (markdown files; newest-wins per file, vault history is the undo) | no separate sync needed: codex *derives* memory from rollouts via an internal job pipeline — syncing the rollouts (which we do) carries the source it regenerates from |
 | Sync triggers | git hooks + SessionStart/End/Stop plugin hooks | git hooks only (no plugin surface) |
 | Resume on another machine | `claude --resume <id>` immediately | `codex resume <id>` immediately; interactive **picker** lists it after first resume (index self-heals; we never write codex's SQLite) |
 | Format risk | munge rule drifted before — `locate()` scans variants; `doctor --verify` is the canary | rollout schema is younger; pinned per-session via `meta.json` `toolVersion` |
@@ -37,7 +38,8 @@ chat setup               # one-time per machine: creates/clones your private vau
                          #   (or: chat setup --url <any-private-git-url>)
 chat init                # once per repo — after this, git push/pull sync sessions
 chat list                # sessions for this repo: name, id, state, device, summary
-chat status              # sync state, conflicts, vault reachability
+chat status              # sync state, conflicts, vault reachability (incl. memory)
+chat memory              # project-memory files and their sync state
 chat resume <name>       # resume any session (pulls it first if needed, picks the tool)
 chat name <session> <n>  # names sync via the vault, usable anywhere an id is
 chat open <session>      # open the transcript in $EDITOR (pulls it if needed)
@@ -87,6 +89,19 @@ nothing is lost and two commands reconcile:
 
 If you resume a stale snapshot, the SessionStart hook warns *inside the
 session* that newer turns were just pulled and how to pick them up.
+
+## Project memory travels too
+
+Claude Code's per-project memory (`~/.claude/projects/<munged>/memory/*.md`)
+syncs automatically with every push/pull — same tokenizer (embedded paths
+rewrite per machine), same hooks, same secret scan. Memory files are mutable
+markdown, so the semantics differ from append-only transcripts: **newest
+mtime wins per file**, every overwrite is logged with the losing device
+named, and the vault's git history keeps every synced state (`git log` in
+the vault is your undo). `chat memory` shows per-file state; `chat status`
+summarizes it. CLAUDE.md travels with the repo, sessions travel in the
+vault, memory travels in the vault — the project's whole AI state moves as
+one.
 
 ## Claude Code plugin (`plugin/`)
 

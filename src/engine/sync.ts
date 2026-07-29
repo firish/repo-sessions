@@ -13,6 +13,7 @@ import {
   readTranscript,
   writeConflict,
   writeTranscript,
+  type MemoryEntry,
   type ProjectEntry,
   type SessionEntry,
   type VaultIndex,
@@ -34,6 +35,7 @@ export interface PushResult {
   remoteAhead: number;
   conflicts: number;
   ignored: number;
+  memoryPushed: number;
   committed: boolean;
 }
 
@@ -44,6 +46,7 @@ export interface PullResult {
   localAhead: number;
   conflicts: number;
   ignored: number;
+  memoryInstalled: number;
   installedIds: string[];
   updatedIds: string[];
   detail: Record<string, { summary?: string; device: string }>;
@@ -83,6 +86,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
     remoteAhead: 0,
     conflicts: 0,
     ignored: 0,
+    memoryPushed: 0,
     committed: false,
   };
 
@@ -166,6 +170,40 @@ export function pushSessions(ctx: SyncCtx): PushResult {
     }
   }
 
+  // ---- memory (mutable markdown: newest-mtime-wins per file, vault history is the undo)
+  for (const { adapter, env } of ctx.adapters) {
+    if (!adapter.locateMemory) continue;
+    const tool = (project.tools[adapter.id] ??= { sessions: {} });
+    const memIndex = (tool.memory ??= {});
+    const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
+    const memDir = join(projectDir, adapter.id, 'memory');
+
+    for (const ref of adapter.locateMemory(ctx.repoRoot, env)) {
+      const tok = adapter.tokenize(readFileSync(ref.filePath, 'utf8'), pathCtx);
+      const sha = sha256hex(tok);
+      const entry = memIndex[ref.fileName];
+      if (entry && entry.sha256 === sha) continue; // unchanged
+      if (entry && entry.mtimeMs > ref.mtimeMs) continue; // vault is newer; pull resolves
+      if (entry && entry.device !== ctx.cfg.device) {
+        log.warn(`memory ${ref.fileName}: overwriting ${entry.device}'s version (previous state stays in vault history)`);
+      }
+      const secrets = scanSecrets(tok);
+      if (secrets.length > 0) {
+        log.warn(`memory ${ref.fileName}: possible secrets (${describeFindings(secrets)})`);
+      }
+      mkdirSync(memDir, { recursive: true });
+      writeFileSync(join(memDir, ref.fileName), tok);
+      memIndex[ref.fileName] = {
+        sha256: sha,
+        byteLen: Buffer.byteLength(tok),
+        mtimeMs: ref.mtimeMs,
+        device: ctx.cfg.device,
+        syncedAt: nowIso(),
+      } satisfies MemoryEntry;
+      result.memoryPushed++;
+    }
+  }
+
   if (!existsSync(projectJson)) {
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(
@@ -177,7 +215,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
 
   const changed = result.pushed + result.fastForwarded + result.conflicts;
   result.committed = vault.commitAndPush(
-    `sync(${key.slug}): ${changed} session(s) from ${ctx.cfg.device}`,
+    `sync(${key.slug}): ${changed} session(s)${result.memoryPushed ? ` + ${result.memoryPushed} memory file(s)` : ''} from ${ctx.cfg.device}`,
   );
   return result;
 }
@@ -197,6 +235,7 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
     localAhead: 0,
     conflicts: 0,
     ignored: 0,
+    memoryInstalled: 0,
     installedIds: [],
     updatedIds: [],
     detail: {},
@@ -245,9 +284,41 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
       } else {
         result.conflicts++;
         log.warn(
-          `session ${sessionId.slice(0, 8)} diverged from vault; local kept, see css status`,
+          `session ${sessionId.slice(0, 8)} diverged from vault; local kept, see chat status`,
         );
       }
+    }
+  }
+
+  // ---- memory (newest-mtime-wins per file; overwrites are logged, history keeps everything)
+  for (const { adapter, env } of ctx.adapters) {
+    if (!adapter.locateMemory || !adapter.memoryPath) continue;
+    const memIndex = project.tools[adapter.id]?.memory;
+    if (!memIndex) continue;
+    const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
+    const localByName = new Map(adapter.locateMemory(ctx.repoRoot, env).map((r) => [r.fileName, r]));
+
+    for (const [fileName, entry] of Object.entries(memIndex)) {
+      const vaultFile = join(vault.path, key.dirName, adapter.id, 'memory', fileName);
+      if (!existsSync(vaultFile)) continue;
+      const tok = readFileSync(vaultFile, 'utf8');
+      const local = localByName.get(fileName);
+
+      if (!local) {
+        const target = adapter.memoryPath(fileName, ctx.repoRoot, env);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, adapter.rehydrate(tok, pathCtx));
+        result.memoryInstalled++;
+        continue;
+      }
+      const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx);
+      if (localTok === tok) continue;
+      if (entry.mtimeMs > local.mtimeMs) {
+        log.warn(`memory ${fileName}: replaced by newer version from ${entry.device} (previous state stays in vault history)`);
+        writeFileSync(local.filePath, adapter.rehydrate(tok, pathCtx));
+        result.memoryInstalled++;
+      }
+      // local newer: push resolves it
     }
   }
   return result;

@@ -384,8 +384,9 @@ export function cmdPush(cwd: string, opts: { quiet: boolean }): void {
     log.info(
       `push: ${res.pushed} new, ${res.fastForwarded} updated, ${res.upToDate} up-to-date` +
         (res.remoteAhead ? `, ${res.remoteAhead} remote-ahead` : '') +
+        (res.memoryPushed ? `, ${res.memoryPushed} memory` : '') +
         (res.conflicts ? `, ${res.conflicts} CONFLICT` : '') +
-        (changed || res.conflicts ? ' — vault updated' : ''),
+        (changed || res.memoryPushed || res.conflicts ? ' — vault updated' : ''),
     );
   } catch (err) {
     // G5: a missing vault must never break the flow that triggered us.
@@ -408,6 +409,7 @@ export function cmdPull(cwd: string, opts: { quiet: boolean; id?: string }): voi
     log.info(
       `pull: ${res.installed} installed, ${res.fastForwarded} updated, ${res.upToDate} up-to-date` +
         (res.localAhead ? `, ${res.localAhead} local-ahead` : '') +
+        (res.memoryInstalled ? `, ${res.memoryInstalled} memory` : '') +
         (res.conflicts ? `, ${res.conflicts} diverged (kept local)` : ''),
     );
   } catch (err) {
@@ -518,12 +520,21 @@ export function cmdStatus(cwd: string): void {
   log.info(`repo: ${marker.slug} (${marker.dirName})${marker.dirty ? ' — DIRTY, last push failed' : ''}`);
   log.info(`last push: ${marker.lastPush ?? 'never'}   last pull: ${marker.lastPull ?? 'never'}`);
 
-  const rows = collectRows(buildCtx(root, cfg));
+  const ctx = buildCtx(root, cfg);
+  const rows = collectRows(ctx);
   const count = (s: Row['state']): number => rows.filter((r) => r.state === s).length;
   log.info(
     `sessions: ${rows.length} total — ${count('synced')} synced, ${count('unsynced')} unsynced, ` +
       `${count('ahead')} ahead, ${count('behind')} behind, ${count('remote')} remote-only, ${count('diverged')} diverged`,
   );
+  const mem = collectMemoryRows(ctx, loadProject(cfg, marker));
+  if (mem.length > 0) {
+    const mcount = (s: MemoryRow['state']): number => mem.filter((r) => r.state === s).length;
+    log.info(
+      `memory: ${mem.length} file(s) — ${mcount('synced')} synced, ${mcount('unsynced')} unsynced, ` +
+        `${mcount('ahead')} ahead, ${mcount('behind')} behind, ${mcount('remote-only')} remote-only`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------- rebase / split / duplicate / name
@@ -800,6 +811,56 @@ export function cmdName(cwd: string, target: string | undefined, newName: string
   vault.saveIndex(index);
   vault.commitAndPush(`name(${marker.slug}): ${id.slice(0, 8)} -> ${name}`);
   log.info(`${id.slice(0, 8)} is now "${name}" (synced everywhere)`);
+}
+
+// ---------------------------------------------------------------- memory
+
+interface MemoryRow {
+  file: string;
+  tool: string;
+  state: 'synced' | 'ahead' | 'behind' | 'unsynced' | 'remote-only';
+  device: string;
+  mtimeMs: number;
+}
+
+function collectMemoryRows(ctx: SyncCtx, project: ProjectEntry | undefined): MemoryRow[] {
+  const rows: MemoryRow[] = [];
+  for (const { adapter, env } of ctx.adapters) {
+    if (!adapter.locateMemory) continue;
+    const locals = new Map(adapter.locateMemory(ctx.repoRoot, env).map((r) => [r.fileName, r]));
+    const mem = project?.tools[adapter.id]?.memory ?? {};
+    const pathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
+    for (const [file, entry] of Object.entries(mem)) {
+      const local = locals.get(file);
+      locals.delete(file);
+      let state: MemoryRow['state'] = 'remote-only';
+      if (local) {
+        const tok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx);
+        state = sha256hex(tok) === entry.sha256 ? 'synced' : local.mtimeMs > entry.mtimeMs ? 'ahead' : 'behind';
+      }
+      rows.push({ file, tool: adapter.id, state, device: entry.device, mtimeMs: entry.mtimeMs });
+    }
+    for (const local of locals.values()) {
+      rows.push({ file: local.fileName, tool: adapter.id, state: 'unsynced', device: ctx.cfg.device, mtimeMs: local.mtimeMs });
+    }
+  }
+  return rows.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+export function cmdMemory(cwd: string): void {
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+  const rows = collectMemoryRows(buildCtx(root, cfg), loadProject(cfg, marker));
+  if (rows.length === 0) {
+    log.info('no project memory yet (memory syncs automatically with chat push / chat pull)');
+    return;
+  }
+  const w = Math.max(4, ...rows.map((r) => r.file.length));
+  for (const r of rows) {
+    const when = new Date(r.mtimeMs).toISOString().slice(0, 16).replace('T', ' ');
+    log.info(`${r.file.padEnd(w)}  ${r.tool.padEnd(6)}  ${r.state.padEnd(11)}  ${r.device.padEnd(12)}  ${when}`);
+  }
 }
 
 // ---------------------------------------------------------------- gc

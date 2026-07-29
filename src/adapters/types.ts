@@ -33,6 +33,14 @@ export interface InstallRef {
   relPath?: string;
 }
 
+/** A project-scoped memory file (claude: ~/.claude/projects/<munged>/memory/*.md). */
+export interface MemoryRef {
+  fileName: string;
+  filePath: string;
+  byteLen: number;
+  mtimeMs: number;
+}
+
 /** Where the adapter's session store lives; injectable for tests. */
 export interface AdapterEnv {
   home: string;
@@ -54,4 +62,10 @@ export interface Adapter {
   installPath(ref: InstallRef, env: AdapterEnv): string;
   /** Doctor/CI check: does the tool actually resume this session? */
   verifyResume(sessionId: string, repoRoot: string, env: AdapterEnv): Promise<boolean>;
+  /** Project-scoped memory files, for tools that keep them as files (claude).
+   *  Absent = the tool has no syncable per-project memory (codex: global
+   *  SQLite — see support matrix). */
+  locateMemory?(repoRoot: string, env: AdapterEnv): MemoryRef[];
+  /** Where a pulled memory file must land on this machine. */
+  memoryPath?(fileName: string, repoRoot: string, env: AdapterEnv): string;
 }

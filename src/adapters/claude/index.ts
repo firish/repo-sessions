@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { Adapter, AdapterEnv, InstallRef, PathCtx, SessionRef } from '../types.js';
+import type { Adapter, AdapterEnv, InstallRef, MemoryRef, PathCtx, SessionRef } from '../types.js';
 import { mungeCurrent, mungeVariants } from './munge.js';
 
 const TOKEN_ROOT = '${CSS_PROJECT_ROOT}';
@@ -158,6 +158,27 @@ export const claudeAdapter: Adapter = {
   // recompute from the rehydrated cwd with the current rule.
   installPath(ref: InstallRef, env: AdapterEnv): string {
     return join(env.dataDir, mungeCurrent(ref.cwd), `${ref.sessionId}.jsonl`);
+  },
+
+  // Memory lives beside the sessions in the project dir. v1 scope: the
+  // current-munge-rule root dir only (variant/subdir memory dirs are an edge
+  // we haven't seen in the wild).
+  locateMemory(repoRoot: string, env: AdapterEnv): MemoryRef[] {
+    const dir = join(env.dataDir, mungeCurrent(repoRoot), 'memory');
+    if (!existsSync(dir)) return [];
+    const refs: MemoryRef[] = [];
+    for (const entry of readdirSync(dir)) {
+      if (!entry.endsWith('.md')) continue;
+      const filePath = join(dir, entry);
+      const st = statSync(filePath);
+      if (!st.isFile()) continue;
+      refs.push({ fileName: entry, filePath, byteLen: st.size, mtimeMs: st.mtimeMs });
+    }
+    return refs.sort((a, b) => a.fileName.localeCompare(b.fileName));
+  },
+
+  memoryPath(fileName: string, repoRoot: string, env: AdapterEnv): string {
+    return join(env.dataDir, mungeCurrent(repoRoot), 'memory', fileName);
   },
 
   verifyResume(sessionId: string, repoRoot: string, _env: AdapterEnv): Promise<boolean> {
