@@ -1,6 +1,6 @@
 #!/bin/sh
-# Stop: fires after every response — css debounces (10 min since last push,
-# 2 min attempt cooldown) and detaches the push, so this is near-free. Covers
-# laptop-lid-close where SessionEnd may never fire.
+# Stop: fires after every response — the CLI debounces (stopDebounceMinutes)
+# and detaches, so this is near-free. Covers laptop-lid-close handoffs.
+if command -v chat >/dev/null 2>&1; then exec chat hook stop; fi
 command -v css >/dev/null 2>&1 || exit 0
 exec css hook stop

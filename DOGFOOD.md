@@ -21,16 +21,16 @@ the sessions that built the tool travel with it.
 ## Phase 1 — Laptop A (this machine)
 
 ```sh
-cd <repo> && npm run build && npm install -g .   # global `css` FIRST, so hooks embed "css"
-which css && css --version
-css doctor                       # expect: all ok; note the secret-scan line
-css init                         # creates/reuses private firish/claude-sessions-vault
-css enable                       # hooks: installed ×3
-css push                         # first sync — this project's own sessions
-css list                         # expect rows incl. the session that built css
+cd <repo> && npm run build && npm install -g .   # global `chat` FIRST, so hooks embed it
+which chat && chat --version
+chat doctor                       # expect: all ok; note the secret-scan line
+chat init                         # creates/reuses private firish/claude-sessions-vault
+chat enable                       # hooks: installed ×3
+chat push                         # first sync — this project's own sessions
+chat list                         # expect rows incl. the session that built css
 ```
 
-Then make any commit and `git push` — output should be silent, `css status`
+Then make any commit and `git push` — output should be silent, `chat status`
 should show a fresh "last push".
 
 ## Phase 1 — Laptop B
@@ -38,10 +38,10 @@ should show a fresh "last push".
 ```sh
 git clone https://github.com/firish/repo-sessions.git && cd repo-sessions
 npm install && npm run build && npm install -g .
-css doctor && css init           # MUST say "reusing existing private vault repo"
-css enable
-css list                         # laptop A's sessions, state=remote
-css pull                         # first pull is manual (clone predates enable)
+chat doctor && chat init           # MUST say "reusing existing private vault repo"
+chat enable
+chat list                         # laptop A's sessions, state=remote
+chat pull                         # first pull is manual (clone predates enable)
 claude --resume <session-id>     # then ask: "what were we working on?"
 ```
 
@@ -49,7 +49,7 @@ claude --resume <session-id>     # then ask: "what were we working on?"
 Then: make turns in that session, commit something, `git push`; back on
 laptop A `git pull`, start a claude session in the repo, and expect the
 "N session(s) synced from other devices" notice (needs phase 2 plugin, or run
-`css hook session-start` manually to see the JSON).
+`chat hook session-start` manually to see the JSON).
 
 ## Phase 2 — optional surfaces
 
@@ -60,20 +60,20 @@ laptop A `git pull`, start a claude session in the repo, and expect the
 
 ## Phase 3 — real repos (the gate)
 
-Only after phases 1–2: `css enable` in one or two real projects. Watch for a
+Only after phases 1–2: `chat enable` in one or two real projects. Watch for a
 week. Husky/core.hooksPath repos will refuse hooks with instructions — that is
 expected behavior, not a bug.
 
 ## If something fails
 
-Capture: the exact command + stderr, `css status`, `css doctor` output, and
+Capture: the exact command + stderr, `chat status`, `chat doctor` output, and
 `cat .git/hooks/pre-push` from the repo. Transient claude/codex API errors do
 happen — retry once before recording a failure.
 
 ## Rollback (complete)
 
 ```sh
-css disable                      # per repo: hooks out, registration gone
+chat disable                      # per repo: hooks out, registration gone
 npm rm -g repo-sessions
 rm -rf ~/.config/css ~/.local/share/css
 # vault repo on GitHub keeps your data; delete it only if you want everything gone

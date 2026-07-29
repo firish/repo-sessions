@@ -63,7 +63,7 @@ export function planMerge(branches: Branch[]): MergePlan {
     if (tail.some((l) => COMPACT_MARKER.test(l))) {
       throw new CssError(
         `branch "${branch.name}" diverges with a compaction record in its tail — splicing would drop earlier context on replay`,
-        `use: css merge <id> --split  (keeps that branch as its own new session)`,
+        `run: chat split <session>  (keeps that branch as its own new session)`,
       );
     }
     plan.tails.push({ name: branch.name, lines: tail });

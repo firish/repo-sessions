@@ -105,6 +105,7 @@ export function pushSessions(ctx: SyncCtx): PushResult {
         toolVersion: ref.toolVersion,
         syncedAt: nowIso(),
         conflicts: tool.sessions[ref.sessionId]?.conflicts,
+        name: tool.sessions[ref.sessionId]?.name,
       };
 
       if (existing === null) {

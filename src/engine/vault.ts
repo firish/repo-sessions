@@ -21,6 +21,8 @@ export interface SessionEntry {
   syncedAt: string;
   /** Devices that have written a .conflict transcript for this session. */
   conflicts?: string[];
+  /** User-assigned name (chat name) — lives here so it syncs across machines. */
+  name?: string;
 }
 
 export interface ProjectEntry {
@@ -62,7 +64,7 @@ export class Vault {
     });
     if (!heads.ok) throw new CssError('vault remote unreachable', heads.stderr);
     if (heads.stdout === '') return 'empty'; // fresh vault, nothing to pull yet
-    git(['pull', '--rebase', '--quiet'], { cwd: this.path, timeoutMs: 60_000 });
+    git(['pull', '--rebase', '--autostash', '--quiet'], { cwd: this.path, timeoutMs: 60_000 });
     return 'ok';
   }
 
@@ -83,7 +85,7 @@ export class Vault {
     });
     if (!push.ok) {
       log.warn('vault push rejected, rebasing and retrying');
-      git(['pull', '--rebase', '--quiet'], { cwd: this.path, timeoutMs: 60_000 });
+      git(['pull', '--rebase', '--autostash', '--quiet'], { cwd: this.path, timeoutMs: 60_000 });
       const retry = git(['push', '--quiet', '-u', 'origin', 'HEAD'], {
         cwd: this.path,
         allowFail: true,

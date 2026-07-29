@@ -9,10 +9,11 @@ import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
 import { pruneVault } from './engine/gc.js';
 import { duplicateSession, mergeSession, summarizeMerge } from './engine/merge.js';
 import { absoluteCssInvocation, customHooksPath, hookStatus, installHooks, uninstallHooks } from './engine/hooks.js';
+import { findByName, resolveSessionInput, uniquifyName, validateName } from './engine/naming.js';
 import { repoKeyFromOrigin } from './engine/repoKey.js';
 import { describeFindings, scanSecrets } from './engine/secrets.js';
 import { pullSessions, pushSessions, type SyncCtx } from './engine/sync.js';
-import { Vault, readTranscript } from './engine/vault.js';
+import { Vault, readTranscript, type ProjectEntry, type SessionEntry } from './engine/vault.js';
 
 interface Marker {
   dirName: string;
@@ -41,8 +42,28 @@ function writeMarker(repoRoot: string, marker: Marker): void {
 
 function requireConfig(): CssConfig {
   const cfg = loadConfig();
-  if (!cfg) throw new CssError('css is not initialized on this machine', 'run: css init --url <private-git-url>');
+  if (!cfg) throw new CssError('chat is not initialized on this machine', 'run: chat init --url <private-git-url>');
   return cfg;
+}
+
+/** Read-only view of this repo's vault namespace (local clone, no network). */
+function loadProject(cfg: CssConfig, marker: Marker): ProjectEntry | undefined {
+  const vault = new Vault(cfg);
+  vault.ensureCloned();
+  return vault.loadIndex().projects[marker.dirName];
+}
+
+/** Accepts a name, full id, or unique id prefix anywhere a session is expected. */
+function resolveTarget(cfg: CssConfig, marker: Marker, input: string): string {
+  return resolveSessionInput(loadProject(cfg, marker), input);
+}
+
+function entryById(project: ProjectEntry, sessionId: string): SessionEntry | undefined {
+  for (const tool of Object.values(project.tools)) {
+    const e = tool.sessions[sessionId];
+    if (e) return e;
+  }
+  return undefined;
 }
 
 function requireRepo(cwd: string): string {
@@ -53,7 +74,7 @@ function requireRepo(cwd: string): string {
 
 function requireEnabled(repoRoot: string): Marker {
   const marker = readMarker(repoRoot);
-  if (!marker) throw new CssError('this repo is not enabled for session sync', 'run: css enable');
+  if (!marker) throw new CssError('this repo is not enabled for session sync', 'run: chat enable');
   return marker;
 }
 
@@ -76,7 +97,7 @@ export function cmdInit(opts: { url?: string; path?: string }): void {
     // No URL given: reuse the standard vault repo if it exists (second+
     // machine), otherwise create it. Never proceed with a public one.
     if (!gh(['--version']).ok) {
-      throw new CssError('no vault URL given and gh is not installed', 'run: css init --url <private-git-url>');
+      throw new CssError('no vault URL given and gh is not installed', 'run: chat init --url <private-git-url>');
     }
     const login = gh(['api', 'user', '-q', '.login']);
     if (!login.ok || !login.stdout) throw new CssError('gh is not authenticated', 'gh auth login, or pass --url');
@@ -123,24 +144,27 @@ export function cmdInit(opts: { url?: string; path?: string }): void {
   new Vault(cfg).ensureCloned();
   saveConfig(cfg);
   log.info(`vault ready at ${vaultPath} (device: ${cfg.device})`);
-  log.info('next: run "css enable" inside a repo you want synced');
+  log.info('next: run "chat enable" inside a repo you want synced');
 }
 
 // ---------------------------------------------------------------- enable
 
-function resolveCssCmd(): string {
-  const which = spawnSync('sh', ['-c', 'command -v css'], { encoding: 'utf8' });
-  return which.status === 0 && which.stdout.trim() ? 'css' : absoluteCssInvocation();
+function resolveBinCmd(): string {
+  for (const bin of ['chat', 'css']) {
+    const which = spawnSync('sh', ['-c', `command -v ${bin}`], { encoding: 'utf8' });
+    if (which.status === 0 && which.stdout.trim()) return bin;
+  }
+  return absoluteCssInvocation();
 }
 
 function installGitHooks(root: string): void {
   const custom = customHooksPath(root);
   if (custom) {
     log.warn(`core.hooksPath is set (${custom}) — git hooks not installed`);
-    log.warn('add "css push -q" / "css pull -q" to your hook pipeline manually');
+    log.warn('add "chat push -q" / "chat pull -q" to your hook pipeline manually');
     return;
   }
-  for (const r of installHooks(root, resolveCssCmd())) {
+  for (const r of installHooks(root, resolveBinCmd())) {
     log.info(`hook ${r.name}: ${r.action}${r.note ? ` (${r.note})` : ''}`);
   }
 }
@@ -160,7 +184,7 @@ export function cmdEnable(cwd: string, opts: { noHooks?: boolean } = {}): void {
   writeMarker(root, marker);
   log.info(`enabled: ${key.slug} -> vault namespace ${key.dirName}`);
   if (opts.noHooks) {
-    log.info('hooks skipped (--no-hooks) — sync manually with css push / css pull');
+    log.info('hooks skipped (--no-hooks) — sync manually with chat push / chat pull');
   } else {
     installGitHooks(root);
     log.info('sessions now ride git push / git pull on this repo');
@@ -174,7 +198,7 @@ export function cmdEnable(cwd: string, opts: { noHooks?: boolean } = {}): void {
       log.info(`pulled ${res.installed + res.fastForwarded} session(s) from the vault`);
     }
   } catch {
-    log.warn('initial pull skipped (vault unreachable) — run css pull later');
+    log.warn('initial pull skipped (vault unreachable) — run chat pull later');
   }
 }
 
@@ -219,7 +243,7 @@ export function cmdHooks(cwd: string, action: string | undefined): void {
       break;
     }
     default:
-      throw new CssError(`unknown hooks action: ${action}`, 'use css hooks install|uninstall|status');
+      throw new CssError(`unknown hooks action: ${action}`, 'use chat hooks install|uninstall|status');
   }
 }
 
@@ -294,7 +318,7 @@ export function cmdHook(cwd: string, kind: string | undefined): void {
         // what Claude loaded into context.
         if (payload.session_id && res.updatedIds.includes(payload.session_id)) {
           parts.push(
-            'repo-sessions WARNING: this session has newer turns from another device that were just pulled — the context you resumed is a stale snapshot. Tell the user to exit and resume again to include them (continuing here will fork the transcript; css merge can reconcile later).',
+            'repo-sessions WARNING: this session has newer turns from another device that were just pulled — the context you resumed is a stale snapshot. Tell the user to exit and resume again to include them (continuing here will fork the transcript; chat rebase can reconcile later).',
           );
         }
         const otherIds = [...res.installedIds, ...res.updatedIds].filter((id) => id !== payload.session_id);
@@ -338,7 +362,7 @@ export function cmdHook(cwd: string, kind: string | undefined): void {
       return;
     }
     default:
-      throw new CssError(`unknown hook event: ${kind}`, 'use css hook session-start|session-end|stop');
+      throw new CssError(`unknown hook event: ${kind}`, 'use chat hook session-start|session-end|stop');
   }
 }
 
@@ -374,7 +398,8 @@ export function cmdPull(cwd: string, opts: { quiet: boolean; id?: string }): voi
   const root = requireRepo(cwd);
   const marker = requireEnabled(root);
   try {
-    const res = pullSessions(buildCtx(root, cfg), opts.id);
+    const onlyId = opts.id ? resolveTarget(cfg, marker, opts.id) : undefined;
+    const res = pullSessions(buildCtx(root, cfg), onlyId);
     marker.lastPull = nowIso();
     writeMarker(root, marker);
     log.info(
@@ -392,6 +417,7 @@ export function cmdPull(cwd: string, opts: { quiet: boolean; id?: string }): voi
 
 interface Row {
   sessionId: string;
+  name?: string;
   tool: string;
   state: 'synced' | 'ahead' | 'behind' | 'remote' | 'unsynced' | 'diverged';
   device: string;
@@ -423,7 +449,7 @@ function collectRows(ctx: SyncCtx): Row[] {
       const local = localById.get(sessionId);
       localById.delete(sessionId);
       if (!local) {
-        rows.push({ sessionId, tool: adapter.id, state: 'remote', device: entry.device, lastTs: entry.lastTs, summary: entry.summary, conflicts: entry.conflicts });
+        rows.push({ sessionId, name: entry.name, tool: adapter.id, state: 'remote', device: entry.device, lastTs: entry.lastTs, summary: entry.summary, conflicts: entry.conflicts });
         continue;
       }
       const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), {
@@ -437,7 +463,7 @@ function collectRows(ctx: SyncCtx): Row[] {
         const remoteTok = readTranscript(join(vault.path, key.dirName, adapter.id, 'sessions', sessionId)) ?? '';
         state = isPrefixOf(remoteTok, localTok) ? 'ahead' : isPrefixOf(localTok, remoteTok) ? 'behind' : 'diverged';
       }
-      rows.push({ sessionId, tool: adapter.id, state, device: entry.device, lastTs: local.lastTs ?? entry.lastTs, summary: local.summary ?? entry.summary, conflicts: entry.conflicts });
+      rows.push({ sessionId, name: entry.name, tool: adapter.id, state, device: entry.device, lastTs: local.lastTs ?? entry.lastTs, summary: local.summary ?? entry.summary, conflicts: entry.conflicts });
     }
     for (const local of localById.values()) {
       rows.push({ sessionId: local.sessionId, tool: adapter.id, state: 'unsynced', device: ctx.cfg.device, lastTs: local.lastTs, summary: local.summary });
@@ -455,12 +481,13 @@ export function cmdList(cwd: string): void {
     log.info('no sessions for this repo yet');
     return;
   }
+  const nameWidth = Math.max(4, ...rows.map((r) => (r.name ?? '').length));
   for (const r of rows) {
     const age = r.lastTs ? r.lastTs.slice(0, 16).replace('T', ' ') : '                ';
     const flag = r.conflicts?.length ? ` [conflicts: ${r.conflicts.join(',')}]` : '';
     // Full id: it needs to be copy-pasteable into `claude --resume <id>`.
     log.info(
-      `${r.sessionId}  ${r.tool.padEnd(6)}  ${r.state.padEnd(8)}  ${r.device.padEnd(12)}  ${age}  ${(r.summary ?? '').slice(0, 40)}${flag}`,
+      `${(r.name ?? '').padEnd(nameWidth)}  ${r.sessionId}  ${r.tool.padEnd(6)}  ${r.state.padEnd(8)}  ${r.device.padEnd(12)}  ${age}  ${(r.summary ?? '').slice(0, 40)}${flag}`,
     );
   }
 }
@@ -468,7 +495,7 @@ export function cmdList(cwd: string): void {
 export function cmdStatus(cwd: string): void {
   const cfg = loadConfig();
   if (!cfg) {
-    log.info('css: not initialized (run css init)');
+    log.info('chat: not initialized (run chat init)');
     return;
   }
   log.info(`vault: ${cfg.vaultUrl}`);
@@ -482,7 +509,7 @@ export function cmdStatus(cwd: string): void {
   }
   const marker = readMarker(root);
   if (!marker) {
-    log.info('repo: not enabled (run css enable)');
+    log.info('repo: not enabled (run chat enable)');
     return;
   }
   log.info(`repo: ${marker.slug} (${marker.dirName})${marker.dirty ? ' — DIRTY, last push failed' : ''}`);
@@ -496,41 +523,122 @@ export function cmdStatus(cwd: string): void {
   );
 }
 
-// ---------------------------------------------------------------- merge / duplicate
+// ---------------------------------------------------------------- rebase / split / duplicate / name
 
-export function cmdMerge(cwd: string, id: string | undefined, opts: { split: boolean }): void {
-  if (!id) throw new CssError('merge needs a session id', 'css merge <session-id> [--split]');
+export function cmdRebase(cwd: string, target: string | undefined): void {
+  if (!target) throw new CssError('rebase needs a session', 'chat rebase <session-id|name>');
   const cfg = requireConfig();
   const root = requireRepo(cwd);
-  requireEnabled(root);
-  const res = mergeSession(buildCtx(root, cfg), id, { split: opts.split });
-  if (res.mode === 'split') {
-    for (const s of res.splits ?? []) {
-      log.info(`split ${s.device} -> new session ${s.newSessionId}`);
-    }
-    if (res.localReset) log.info(`local ${id.slice(0, 8)} reset to the vault transcript (your divergent turns live in the new session)`);
-    log.info('new sessions sync to the vault on next push');
-    return;
-  }
+  const marker = requireEnabled(root);
+  const id = resolveTarget(cfg, marker, target);
+  const res = mergeSession(buildCtx(root, cfg), id, { split: false });
   if (res.outcome) summarizeMerge(res.outcome, id);
-  log.info(`merged transcript installed locally — resume with the same id`);
+  log.info('rebased transcript installed locally — resume with the same id; other devices converge on next pull');
 }
 
-export function cmdDuplicate(cwd: string, id: string | undefined): void {
-  if (!id) throw new CssError('duplicate needs a session id', 'css duplicate <session-id>');
+/** Give derived names to freshly created sessions once they exist in the index. */
+function nameNewSessions(
+  cfg: CssConfig,
+  marker: Marker,
+  assignments: { sessionId: string; base: string }[],
+  message: string,
+): void {
+  if (assignments.length === 0) return;
+  const vault = new Vault(cfg);
+  const index = vault.loadIndex();
+  const project = index.projects[marker.dirName];
+  if (!project) return;
+  let named = 0;
+  for (const a of assignments) {
+    const entry = entryById(project, a.sessionId);
+    if (entry && !entry.name) {
+      entry.name = uniquifyName(project, a.base);
+      log.info(`named: ${entry.name} (${a.sessionId.slice(0, 8)})`);
+      named++;
+    }
+  }
+  if (named > 0) {
+    vault.saveIndex(index);
+    vault.commitAndPush(message);
+  }
+}
+
+export function cmdSplit(cwd: string, target: string | undefined): void {
+  if (!target) throw new CssError('split needs a session', 'chat split <session-id|name>');
   const cfg = requireConfig();
   const root = requireRepo(cwd);
-  const res = duplicateSession(buildCtx(root, cfg), id);
+  const marker = requireEnabled(root);
+  const id = resolveTarget(cfg, marker, target);
+  const ctx = buildCtx(root, cfg);
+  const originalName = loadProject(cfg, marker) && entryById(loadProject(cfg, marker)!, id)?.name;
+
+  const res = mergeSession(ctx, id, { split: true });
+  for (const s of res.splits ?? []) log.info(`split ${s.device} -> new session ${s.newSessionId}`);
+  if (res.localReset) log.info(`local ${id.slice(0, 8)} reset to the vault transcript (divergent turns live in the new session)`);
+
+  pushSessions(ctx); // the new session files enter the vault immediately
+  const base = originalName ?? id.slice(0, 8);
+  nameNewSessions(
+    cfg,
+    marker,
+    (res.splits ?? []).map((s) => ({ sessionId: s.newSessionId, base: `${base}/${s.device}` })),
+    `name(${marker.slug}): derived split name(s) for ${id.slice(0, 8)}`,
+  );
+}
+
+export function cmdDuplicate(cwd: string, target: string | undefined): void {
+  if (!target) throw new CssError('duplicate needs a session', 'chat duplicate <session-id|name>');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+  const id = resolveTarget(cfg, marker, target);
+  const ctx = buildCtx(root, cfg);
+  const originalName = loadProject(cfg, marker) && entryById(loadProject(cfg, marker)!, id)?.name;
+
+  const res = duplicateSession(ctx, id);
   log.info(`duplicated ${id.slice(0, 8)} -> ${res.newSessionId}`);
+  pushSessions(ctx);
+  if (originalName) {
+    nameNewSessions(
+      cfg,
+      marker,
+      [{ sessionId: res.newSessionId, base: `${originalName}-copy` }],
+      `name(${marker.slug}): ${res.newSessionId.slice(0, 8)} named from ${originalName}`,
+    );
+  }
   log.info(`resume the copy: ${res.tool === 'claude' ? `claude --resume ${res.newSessionId}` : `codex resume ${res.newSessionId}`}`);
-  log.info('it syncs to the vault on next push');
+}
+
+export function cmdName(cwd: string, target: string | undefined, newName: string | undefined): void {
+  if (!target || !newName) throw new CssError('usage: chat name <session-id|name> <new-name>');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+  const vault = new Vault(cfg);
+  vault.ensureCloned();
+  vault.refresh();
+  const index = vault.loadIndex();
+  const project = index.projects[marker.dirName];
+  if (!project) throw new CssError('vault has nothing for this repo yet', 'chat push first');
+  const id = resolveSessionInput(project, target);
+  const name = validateName(newName);
+  const holder = findByName(project, name);
+  if (holder && holder.sessionId !== id) {
+    throw new CssError(`name "${name}" is already used by ${holder.sessionId.slice(0, 8)}`);
+  }
+  const entry = entryById(project, id);
+  if (!entry) throw new CssError(`session ${id} not in the vault for this repo`, 'chat push first');
+  entry.name = name;
+  vault.saveIndex(index);
+  vault.commitAndPush(`name(${marker.slug}): ${id.slice(0, 8)} -> ${name}`);
+  log.info(`${id.slice(0, 8)} is now "${name}" (synced everywhere)`);
 }
 
 // ---------------------------------------------------------------- gc
 
 export function cmdGc(opts: { keep?: number; days?: number }): void {
   if (opts.keep === undefined && opts.days === undefined) {
-    throw new CssError('gc needs a retention rule', 'css gc --keep <n> and/or --days <n>');
+    throw new CssError('gc needs a retention rule', 'chat gc --keep <n> and/or --days <n>');
   }
   const cfg = requireConfig();
   const vault = new Vault(cfg);
@@ -565,13 +673,13 @@ export async function cmdDoctor(cwd: string, opts: { verify?: string }): Promise
   }
 
   const cfg = loadConfig();
-  check('config present', cfg !== null, cfg ? configSummary(cfg) : 'run css init');
+  check('config present', cfg !== null, cfg ? configSummary(cfg) : 'run chat init');
   if (cfg) {
     check('vault reachable', git(['ls-remote', '--heads', cfg.vaultUrl], { allowFail: true, timeoutMs: 15_000 }).ok);
   }
 
   const root = repoToplevel(cwd);
-  if (root) check('repo enabled', readMarker(root) !== null, 'run css enable');
+  if (root) check('repo enabled', readMarker(root) !== null, 'run chat enable');
 
   // Secret scan over this repo's local sessions (plan §4: warn before pushing).
   if (root && readMarker(root)) {

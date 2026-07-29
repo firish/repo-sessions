@@ -4,6 +4,7 @@
   "description": "Your Claude Code and Codex conversations follow your repo, not your laptop. Git-native session sync via a private vault.",
   "type": "module",
   "bin": {
+    "chat": "dist/cli.js",
     "css": "dist/cli.js"
   },
   "files": [

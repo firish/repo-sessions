@@ -48,7 +48,7 @@ describe('merge planning + splice (pure)', () => {
     try {
       planMerge([{ name: 'vault', lines: [...prefix, line('a2', 'u1', 'A'), line('a3', 'a2', 'AA')] }, compactTail]);
     } catch (e) {
-      expect((e as { hint?: string }).hint).toContain('--split');
+      expect((e as { hint?: string }).hint).toContain('chat split');
     }
   });
 

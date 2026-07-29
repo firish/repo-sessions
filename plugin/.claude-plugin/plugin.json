@@ -1,6 +1,6 @@
 {
   "name": "repo-sessions",
-  "description": "Your Claude Code sessions follow your repo: auto-sync via your private vault on session start/end (pairs with the css CLI).",
+  "description": "Your Claude Code sessions follow your repo: auto-sync via your private vault on session start/end (pairs with the chat CLI).",
   "version": "0.1.0",
   "author": {
     "name": "Rishi Gulati"

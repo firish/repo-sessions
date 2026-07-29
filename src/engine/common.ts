@@ -16,10 +16,10 @@ export const log = {
     if (!this.quiet) console.log(msg);
   },
   warn(msg: string): void {
-    if (!this.quiet) console.error(`css: warning: ${msg}`);
+    if (!this.quiet) console.error(`chat: warning: ${msg}`);
   },
   error(msg: string): void {
-    console.error(`css: ${msg}`);
+    console.error(`chat: ${msg}`);
   },
 };
 
