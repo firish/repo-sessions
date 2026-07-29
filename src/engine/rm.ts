@@ -70,7 +70,8 @@ export function rmSession(ctx: SyncCtx, sessionId: string, opts: { force?: boole
     }
     if (removedVault) {
       vault.saveIndex(index);
-      vault.commitAndPush(`rm(${key.slug}): ${sessionId.slice(0, 8)}${entry?.name ? ` (${entry.name})` : ''}`);
+      // Full id in the message — chat restore's deleted-listing parses these.
+      vault.commitAndPush(`rm(${key.slug}): ${sessionId}${entry?.name ? ` (${entry.name})` : ''}`);
     }
   }
   return { removedLocal, removedVault, name: entry?.name };

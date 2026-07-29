@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmdDisable, cmdDoctor, cmdFork, cmdGc, cmdHook, cmdHooks, cmdIgnore, cmdInit, cmdList, cmdName, cmdPull, cmdPush, cmdRebase, cmdResume, cmdRm, cmdSetup, cmdSplit, cmdStatus } from './commands.js';
+import { cmdDisable, cmdDoctor, cmdFork, cmdGc, cmdHook, cmdHooks, cmdIgnore, cmdInit, cmdList, cmdName, cmdOpen, cmdPull, cmdPush, cmdRebase, cmdRestore, cmdResume, cmdRm, cmdSetup, cmdSplit, cmdStatus } from './commands.js';
 import { CssError, log } from './engine/common.js';
 
 const HELP = `chat — your agent sessions follow your repo (Claude Code + Codex)
@@ -18,8 +18,10 @@ usage:
   chat name <session|name> <new-name>         name a session (names sync via the vault)
   chat rebase <session|name>                  reconcile a diverged session (replay tails onto trunk)
   chat split <session|name>                   turn a diverged branch into its own session
-  chat fork <session|name>                    fork a session into a new id
+  chat fork <session|name> [--at <hash>]      fork a session (optionally from a past vault state)
+  chat open <session|name>                    open the transcript file ($EDITOR, pulls if needed)
   chat rm <session|name> [--force]            delete a session (local + vault; vault history keeps it)
+  chat restore [<session-id>] [--at <hash>]   resurrect a deleted session (no args: list deleted)
   chat ignore <session|name|glob>             never sync a session (.chatignore)
   chat hooks [install|uninstall|status]       manage the git hooks for this repo
   chat gc --keep <n> --days <n>               prune old sessions from the vault
@@ -41,6 +43,7 @@ interface Flags {
   verify?: string;
   keep?: number;
   days?: number;
+  at?: string;
 }
 
 function parseFlags(args: string[]): Flags {
@@ -61,6 +64,7 @@ function parseFlags(args: string[]): Flags {
     else if (a === '--verify') flags.verify = args[++i];
     else if (a === '--keep') flags.keep = num(args[++i], '--keep');
     else if (a === '--days') flags.days = num(args[++i], '--days');
+    else if (a === '--at') flags.at = args[++i];
     else throw new CssError(`unknown argument: ${a}`, 'run chat help');
   }
   return flags;
@@ -84,7 +88,7 @@ async function main(): Promise<void> {
 
   // subcommand-style verbs take bare words (action, session, name) before flags
   const subArgs: string[] = [];
-  if (['hooks', 'hook', 'merge', 'rebase', 'split', 'duplicate', 'fork', 'name', 'rm', 'resume', 'ignore'].includes(cmd)) {
+  if (['hooks', 'hook', 'merge', 'rebase', 'split', 'duplicate', 'fork', 'name', 'rm', 'resume', 'ignore', 'open', 'restore'].includes(cmd)) {
     while (rest[0] && !rest[0].startsWith('-')) subArgs.push(rest.shift()!);
   }
   const sub = subArgs[0];
@@ -133,7 +137,13 @@ async function main(): Promise<void> {
       break;
     case 'fork':
     case 'duplicate': // pre-rename alias
-      cmdFork(cwd, sub);
+      cmdFork(cwd, sub, { at: flags.at });
+      break;
+    case 'open':
+      cmdOpen(cwd, sub);
+      break;
+    case 'restore':
+      cmdRestore(cwd, sub, { at: flags.at });
       break;
     case 'name':
       cmdName(cwd, sub, subArgs[1]);

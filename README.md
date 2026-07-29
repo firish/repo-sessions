@@ -40,7 +40,9 @@ chat list                # sessions for this repo: name, id, state, device, summ
 chat status              # sync state, conflicts, vault reachability
 chat resume <name>       # resume any session (pulls it first if needed, picks the tool)
 chat name <session> <n>  # names sync via the vault, usable anywhere an id is
+chat open <session>      # open the transcript in $EDITOR (pulls it if needed)
 chat rm <session>        # delete local + vault (refuses unsynced turns without --force)
+chat restore [<id>]      # resurrect a deleted session; no args lists deleted ones
 chat ignore <session>    # never sync this session (.chatignore; globs work)
 chat push / chat pull    # manual sync (hooks make this mostly unnecessary)
 chat gc --keep 20 --days 90           # vault retention (per project/tool)
@@ -72,7 +74,12 @@ nothing is lost and two commands reconcile:
   contains a compaction boundary, which cannot be safely spliced): the
   divergent branch becomes its own new session, the old id converges.
 - `chat fork <session|name>` forks any session into a new id — useful before
-  experiments, or to deliberately branch work per machine.
+  experiments, or to deliberately branch work per machine. `--at <vault-hash>`
+  forks from a **past vault state** ("the chat as of Tuesday") — the safe way
+  to rewind, since in-place truncation would fight the append-only sync model
+  (other devices would push the "missing" turns right back). The vault being
+  git means every synced state is recoverable: `chat restore` resurrects
+  deleted sessions the same way.
 - `chat name <session|name> <new-name>` names a session; names live in the
   vault index so they follow you across machines, work for both tools, and are
   accepted anywhere an id is. Split/fork derive names automatically

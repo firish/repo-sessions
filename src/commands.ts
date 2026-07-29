@@ -7,6 +7,7 @@ import { CssError, isPrefixOf, log, nowIso, sha256hex } from './engine/common.js
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
 import { pruneVault } from './engine/gc.js';
+import { forkSessionAt, listRemovedSessions, restoreSession } from './engine/history.js';
 import { appendIgnore, loadIgnorePatterns, makeIgnoreFn, IGNORE_FILE } from './engine/ignore.js';
 import { duplicateSession, mergeSession, summarizeMerge } from './engine/merge.js';
 import { absoluteCssInvocation, customHooksPath, hookStatus, installHooks, uninstallHooks } from './engine/hooks.js';
@@ -588,27 +589,106 @@ export function cmdSplit(cwd: string, target: string | undefined): void {
   );
 }
 
-export function cmdFork(cwd: string, target: string | undefined): void {
-  if (!target) throw new CssError('fork needs a session', 'chat fork <session-id|name>');
+/** Deleted sessions have no index entry — fall back to matching against ids
+ *  found in rm commits, so restore/fork --at still take prefixes. */
+function resolveTargetOrHistorical(cfg: CssConfig, marker: Marker, input: string): string {
+  try {
+    return resolveTarget(cfg, marker, input);
+  } catch (err) {
+    if (/^[0-9a-f-]{6,}$/i.test(input)) {
+      const removed = listRemovedSessions(new Vault(cfg)).filter((r) => r.id.startsWith(input.toLowerCase()));
+      if (removed.length === 1 && removed[0]!.id.length === 36) return removed[0]!.id;
+    }
+    throw err;
+  }
+}
+
+export function cmdFork(cwd: string, target: string | undefined, opts: { at?: string } = {}): void {
+  if (!target) throw new CssError('fork needs a session', 'chat fork <session-id|name> [--at <vault-hash>]');
   const cfg = requireConfig();
   const root = requireRepo(cwd);
   const marker = requireEnabled(root);
-  const id = resolveTarget(cfg, marker, target);
   const ctx = buildCtx(root, cfg);
+  const id = resolveTargetOrHistorical(cfg, marker, target);
   const originalName = loadProject(cfg, marker) && entryById(loadProject(cfg, marker)!, id)?.name;
 
-  const res = duplicateSession(ctx, id);
-  log.info(`forked ${id.slice(0, 8)} -> ${res.newSessionId}`);
+  let newSessionId: string;
+  if (opts.at !== undefined || !entryById(loadProject(cfg, marker) ?? { slug: '', origin: '', tools: {} }, id)) {
+    // historical fork: from a past vault state (or the last state of a deleted session)
+    const res = forkSessionAt(ctx, id, opts.at);
+    newSessionId = res.newSessionId;
+    log.info(`forked ${id.slice(0, 8)} @ ${res.hash.slice(0, 8)} -> ${newSessionId}`);
+  } else {
+    const res = duplicateSession(ctx, id);
+    newSessionId = res.newSessionId;
+    log.info(`forked ${id.slice(0, 8)} -> ${newSessionId}`);
+  }
   pushSessions(ctx);
   if (originalName) {
     nameNewSessions(
       cfg,
       marker,
-      [{ sessionId: res.newSessionId, base: `${originalName}-fork` }],
-      `name(${marker.slug}): ${res.newSessionId.slice(0, 8)} named from ${originalName}`,
+      [{ sessionId: newSessionId, base: `${originalName}-fork` }],
+      `name(${marker.slug}): ${newSessionId.slice(0, 8)} named from ${originalName}`,
     );
   }
-  log.info(`resume the fork: chat resume ${res.newSessionId}`);
+  log.info(`resume the fork: chat resume ${newSessionId}`);
+}
+
+// ---------------------------------------------------------------- open / restore
+
+export function cmdOpen(cwd: string, target: string | undefined): void {
+  if (!target) throw new CssError('open needs a session', 'chat open <session-id|name>');
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+  const id = resolveTarget(cfg, marker, target);
+  const ctx = buildCtx(root, cfg);
+
+  const find = (): string | undefined =>
+    ctx.adapters.flatMap((a) => a.adapter.locate(root, a.env)).find((r) => r.sessionId === id)?.filePath;
+  let filePath = find();
+  if (!filePath) {
+    log.info('session not local yet — pulling from the vault…');
+    pullSessions(ctx, id);
+    filePath = find();
+  }
+  if (!filePath) throw new CssError(`session ${id.slice(0, 8)} not found locally after pull`);
+
+  log.info(filePath);
+  const editor = process.env.VISUAL ?? process.env.EDITOR;
+  if (editor) {
+    spawnSync(editor, [filePath], { stdio: 'inherit' });
+  } else {
+    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+    spawnSync(opener, [filePath], { stdio: 'ignore' });
+  }
+}
+
+export function cmdRestore(cwd: string, target: string | undefined, opts: { at?: string }): void {
+  const cfg = requireConfig();
+  const root = requireRepo(cwd);
+  const marker = requireEnabled(root);
+
+  if (!target) {
+    // list deleted sessions still absent from the vault
+    const vault = new Vault(cfg);
+    vault.ensureCloned();
+    const project = loadProject(cfg, marker);
+    const removed = listRemovedSessions(vault).filter((r) => !(project && r.id.length === 36 && entryById(project, r.id)));
+    if (removed.length === 0) {
+      log.info('no deleted sessions found in vault history');
+      return;
+    }
+    for (const r of removed) log.info(`${r.id}  ${r.when.replace('T', ' ')}  ${r.name ?? ''}`);
+    log.info('restore one with: chat restore <id>');
+    return;
+  }
+
+  const id = resolveTargetOrHistorical(cfg, marker, target);
+  const res = restoreSession(buildCtx(root, cfg), id, { at: opts.at });
+  log.info(`restored ${id.slice(0, 8)} (${res.toolId}) from vault commit ${res.hash.slice(0, 8)}`);
+  if (res.installedAt) log.info(`installed locally — chat resume ${id.slice(0, 8)} to continue it`);
 }
 
 // ---------------------------------------------------------------- rm / resume / ignore

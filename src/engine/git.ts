@@ -31,6 +31,16 @@ export function git(
   return out;
 }
 
+/** Binary-safe git read (git show of gzipped blobs). Returns null on failure. */
+export function gitBuffer(args: string[], cwd: string): Buffer | null {
+  const res = spawnSync('git', args, {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return res.status === 0 ? (res.stdout as Buffer) : null;
+}
+
 /** Toplevel of the repo containing cwd, or null when outside any repo. */
 export function repoToplevel(cwd: string): string | null {
   const res = git(['rev-parse', '--show-toplevel'], { cwd, allowFail: true });
