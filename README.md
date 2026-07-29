@@ -1,25 +1,35 @@
 # repo-sessions (`chat`)
 
-> Your Claude Code conversations follow your repo, not your laptop.
+[![ci](https://github.com/firish/repo-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/firish/repo-sessions/actions/workflows/ci.yml)
 
-Git-native sync of coding-agent sessions across devices through a single
-**private vault repo**. Start a session on laptop A, `git push`; on laptop B,
-`git pull` and `claude --resume` — the conversation is there, with every
-embedded path rewritten for that machine. Claude Code ships first; Codex is
-next (its mechanics are already validated — see `M0-FINDINGS.md`).
+> Your Claude Code and Codex sessions follow your **repo**, not your laptop.
 
-**Status: M3 (pre-launch).** Both launch adapters work end-to-end and sync
-rides your git muscle memory: `chat enable` installs chain-loading git hooks
-(`pre-push` syncs out, `post-merge`/`post-checkout` sync in, in the
-background), and the bundled Claude Code plugin adds SessionStart/SessionEnd/
-Stop lifecycle sync plus `/sessions` commands. Vault transcripts are gzipped,
-`chat gc` handles retention, and push/doctor run a secret scan. 40 unit tests;
-`scripts/e2e-local.sh` (claude, hook-driven) and `scripts/e2e-codex.sh`
-(codex, real CLI) prove both flows live. Not yet published.
+<!-- demo GIF goes here: laptop A session → git push → laptop B git pull → claude --resume -->
 
-The binary is `chat` (`css`, the original working name, remains as an alias —
-existing hooks keep working). If a machine ships pppd's ancient `/usr/sbin/chat`,
-the npm bin shadows it on PATH order; the alias is the fallback.
+Start a session on laptop A, `git push`. On laptop B, `git pull` — and
+`claude --resume` (or `codex resume`) picks up the conversation with every
+embedded path rewritten for that machine. **Project memory travels too.**
+Everything syncs through a single **private vault repo you own** — Copilot
+syncs your chats to Microsoft's cloud; your sessions sync to *your* git
+remote, riding the push/pull you already make.
+
+```sh
+npm install -g repo-sessions
+chat setup      # once per machine — creates/reuses your private vault
+chat init       # once per repo — from here, git push/pull carry your sessions
+```
+
+Optional Claude Code plugin (in-session sync notices, `/sessions`):
+
+```
+/plugin marketplace add firish/repo-sessions
+/plugin install repo-sessions
+```
+
+Proven on macOS, Windows, and Linux (hermetic 3-OS CI; dogfooded across
+three real machines). The binary is `chat` (`css`, the original working
+name, remains an alias). If a machine ships pppd's ancient
+`/usr/sbin/chat`, the npm bin shadows it on PATH order.
 
 ## Support matrix
 
@@ -145,12 +155,40 @@ Treat the vault like you treat `.env`.
 
 ## Known gaps (pre-launch)
 
-- **Windows is untested.** JSON-escaped `\\` paths break the plain
-  string-replacement assumption; the ADR-3 matrix cell needs a Windows machine.
 - **Codex picker visibility** before first resume (see matrix) — deliberate:
   fabricating rows in codex's SQLite risks more than it buys.
 - Demo GIFs not yet recorded — `scripts/e2e-local.sh` and `e2e-codex.sh` are
   the choreography.
+
+(Windows was on this list; it's now fully tested — real-machine dogfood
+found and fixed the JSON-escaped `\\` path class, and CI runs the suite on
+all three OSes.)
+
+## FAQ
+
+**Does this cover IDE sessions or just the CLI?** Both — Claude Code's CLI,
+VS Code extension, and desktop app share one local store, and so do Codex's
+CLI + VS Code extension. We sync the store, so every surface travels.
+
+**What if I resume the same chat on two machines?** Sequential use with the
+hooks on never diverges (push-on-stop, pull-on-start, stale-resume warning).
+When it does diverge, nothing is lost: `chat rebase` splices the tails,
+`chat split` turns a branch into its own session.
+
+**Do my "always allow" permissions / skills / MCP servers travel?** See
+"What travels, and why" above — skills, agents, and `.mcp.json` already have
+git-tracked homes (git is their sync); permissions sync is planned (v1.1,
+opt-in, never the `env` block).
+
+**Is my code safe in the vault?** The vault must be private (`chat setup`
+refuses public GitHub vaults), pushes are secret-scanned, `.chatignore`
+keeps any session out entirely, and session data never touches your
+project's own git history by construction. Full story: "Threat model,
+plainly" below.
+
+**I deleted something — recoverable?** The vault is git. `chat restore`
+resurrects deleted sessions; `chat fork --at <hash>` forks any past state;
+memory overwrites keep every prior state in vault history.
 
 ## Development
 
