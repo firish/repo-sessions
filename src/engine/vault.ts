@@ -58,6 +58,7 @@ export class Vault {
   ensureCloned(): void {
     if (existsSync(join(this.path, '.git'))) {
       this.ensureAttributes();
+      this.ensureHttpPostBuffer();
       return;
     }
     mkdirSync(dirname(this.path), { recursive: true });
@@ -66,6 +67,7 @@ export class Vault {
       throw new CssError(`could not clone vault from ${this.cfg.vaultUrl}`, res.stderr);
     }
     this.ensureAttributes();
+    this.ensureHttpPostBuffer();
   }
 
   /** The vault is a data store, not source code: `* -text` disables git's
@@ -76,6 +78,16 @@ export class Vault {
     const attrs = join(this.path, '.gitattributes');
     if (existsSync(attrs)) return;
     writeFileSync(attrs, '* -text\n');
+  }
+
+  /** git's default 1 MiB http.postBuffer rejects pushes of multi-MB packs
+   *  over https with an opaque HTTP 400 — and gzipped transcripts routinely
+   *  exceed 1 MiB, so background pushes would fail silently. Repo-local
+   *  setting; harmless for ssh remotes. */
+  private ensureHttpPostBuffer(): void {
+    const cur = git(['config', '--local', 'http.postBuffer'], { cwd: this.path, allowFail: true });
+    if (cur.ok && cur.stdout !== '') return;
+    git(['config', '--local', 'http.postBuffer', '157286400'], { cwd: this.path, allowFail: true });
   }
 
   /** Bring the local clone up to date. Throws CssError when the remote is
