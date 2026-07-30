@@ -15,6 +15,8 @@ remote, riding the push/pull you already make.
 
 ```sh
 npm install -g repo-sessions
+hash -r         # refresh the shell's command cache (zsh caches lookups;
+                #   without this, already-open shells can miss the new bin)
 chat setup      # once per machine — creates/reuses your private vault
 chat init       # once per repo — from here, git push/pull carry your sessions
 ```
@@ -29,7 +31,10 @@ Optional Claude Code plugin (in-session sync notices, `/sessions`):
 Proven on macOS, Windows, and Linux (hermetic 3-OS CI; dogfooded across
 three real machines). The binary is `chat` (`css`, the original working
 name, remains an alias). If a machine ships pppd's ancient
-`/usr/sbin/chat`, the npm bin shadows it on PATH order.
+`/usr/sbin/chat` (macOS does), the npm bin shadows it on PATH order — but
+shells opened before the install may have the old path cached and will
+silently run the pppd tool instead (it blocks waiting on stdin, so `chat`
+appears to "do nothing"). `hash -r` (or a new terminal) fixes it.
 
 ## Support matrix
 
@@ -73,9 +78,10 @@ their failure still aborts the git operation; chat never does.
 ## Working from any laptop
 
 Sequential use (one laptop at a time) never diverges as long as syncs are
-tight: SessionEnd pushes immediately, the Stop hook pushes at most
-`stopDebounceMinutes` (config.json; default 2, `0` = every response) behind
-your last message, and SessionStart/`chat enable` pull before you resume.
+tight: SessionEnd pushes immediately, the Stop hook pushes after every
+response (`stopDebounceMinutes` in config.json; default 0 — raise it on
+slow connections to push at most that many minutes behind your last
+message), and SessionStart/`chat enable` pull before you resume.
 When divergence does happen — you resumed on B before A's tail pushed —
 nothing is lost and two commands reconcile:
 
@@ -135,7 +141,7 @@ this tool exists to close.
 
 SessionStart pulls newer sessions, names what arrived, and warns if you
 resumed a stale snapshot; SessionEnd pushes in a detached background process;
-Stop debounce-pushes (`stopDebounceMinutes`, default 2) to cover
+Stop pushes after every response (`stopDebounceMinutes`, default 0) to cover
 laptop-lid-close. `/sessions list|push|pull|status` wraps the CLI. Marketplace listing comes with M4 — until then, point Claude
 Code at the `plugin/` directory (requires `chat` on PATH via `npm i -g .`).
 
