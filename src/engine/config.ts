@@ -6,8 +6,9 @@ export interface CssConfig {
   vaultUrl: string;
   vaultPath: string;
   device: string;
-  /** Stop-hook push debounce in minutes. Default 2; 0 = push after every
-   *  response. Small values make lid-close laptop-hopping near-lossless. */
+  /** Stop-hook push debounce in minutes. Default 0 = push after every
+   *  response, so lid-close laptop-hopping never strands a tail. Raise it
+   *  on slow/metered connections to trade freshness for fewer pushes. */
   stopDebounceMinutes?: number;
 }
 

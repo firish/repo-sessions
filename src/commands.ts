@@ -288,7 +288,7 @@ function spawnBackgroundPush(root: string): void {
   spawn(process.execPath, [cli, 'push', '-q'], { cwd: root, detached: true, stdio: 'ignore' }).unref();
 }
 
-const DEFAULT_STOP_DEBOUNCE_MIN = 2;
+const DEFAULT_STOP_DEBOUNCE_MIN = 0;
 const ATTEMPT_COOLDOWN_MS = 2 * 60 * 1000;
 
 /** Claude Code hook payload arrives on stdin; tolerate manual invocations. */
