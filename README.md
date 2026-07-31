@@ -57,7 +57,8 @@ chat status              # sync state, conflicts, vault reachability (incl. memo
 chat memory              # project-memory files and their sync state
 chat resume <name>       # resume any session (pulls it first if needed, picks the tool)
 chat name <session> <n>  # names sync via the vault, usable anywhere an id is
-chat open <session>      # open the transcript in $EDITOR (pulls it if needed)
+chat open <session>      # open a transcript or memory file in $EDITOR,
+                         #   else the OS default app (pulls it if needed)
 chat rm <session>        # delete local + vault (refuses unsynced turns without --force)
 chat restore [<id>]      # resurrect a deleted session; no args lists deleted ones
 chat ignore <session>    # never sync this session (.chatignore; globs work)

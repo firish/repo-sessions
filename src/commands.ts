@@ -657,13 +657,63 @@ export function cmdFork(cwd: string, target: string | undefined, opts: { at?: st
 
 // ---------------------------------------------------------------- open / restore
 
+/** $VISUAL/$EDITOR first (may carry args, may be a .cmd shim — run through
+ *  the shell, quoting only the path), else the OS default opener. The old
+ *  fallback ran xdg-open on win32, which doesn't exist — open silently did
+ *  nothing there beyond printing the path. */
+function openPath(filePath: string): void {
+  const editor = process.env.VISUAL ?? process.env.EDITOR;
+  if (editor) {
+    spawnSync(`${editor} "${filePath}"`, { shell: true, stdio: 'inherit' });
+    return;
+  }
+  if (process.platform === 'win32') {
+    spawnSync('explorer', [filePath], { stdio: 'ignore' }); // default association / Open-With picker
+  } else {
+    spawnSync(process.platform === 'darwin' ? 'open' : 'xdg-open', [filePath], { stdio: 'ignore' });
+  }
+}
+
+function findMemoryFile(ctx: SyncCtx, root: string, name: string): string | undefined {
+  const locate = (): string | undefined => {
+    for (const { adapter, env } of ctx.adapters) {
+      const ref = adapter.locateMemory?.(root, env).find((m) => m.fileName === name);
+      if (ref) return ref.filePath;
+    }
+    return undefined;
+  };
+  let p = locate();
+  if (!p && name.endsWith('.md')) {
+    // not local (yet) — a pull installs vault memory files too
+    pullSessions(ctx);
+    p = locate();
+  }
+  return p;
+}
+
 export function cmdOpen(cwd: string, target: string | undefined): void {
-  if (!target) throw new CssError('open needs a session', 'chat open <session-id|name>');
+  if (!target) throw new CssError('open needs a target', 'chat open <session-id|name|memory-file.md>');
   const cfg = requireConfig();
   const root = requireRepo(cwd);
   const marker = requireEnabled(root);
-  const id = resolveTarget(cfg, marker, target);
   const ctx = buildCtx(root, cfg);
+
+  let id: string;
+  try {
+    id = resolveTarget(cfg, marker, target);
+  } catch (err) {
+    // Not a session — memory files are openable by their listed name.
+    const memPath = findMemoryFile(ctx, root, target);
+    if (memPath) {
+      log.info(memPath);
+      openPath(memPath);
+      return;
+    }
+    if (err instanceof CssError) {
+      throw new CssError(`no session or memory file named "${target}"`, 'chat list shows sessions; chat memory shows memory files');
+    }
+    throw err;
+  }
 
   const find = (): string | undefined =>
     ctx.adapters.flatMap((a) => a.adapter.locate(root, a.env)).find((r) => r.sessionId === id)?.filePath;
@@ -676,13 +726,7 @@ export function cmdOpen(cwd: string, target: string | undefined): void {
   if (!filePath) throw new CssError(`session ${id.slice(0, 8)} not found locally after pull`);
 
   log.info(filePath);
-  const editor = process.env.VISUAL ?? process.env.EDITOR;
-  if (editor) {
-    spawnSync(editor, [filePath], { stdio: 'inherit' });
-  } else {
-    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
-    spawnSync(opener, [filePath], { stdio: 'ignore' });
-  }
+  openPath(filePath);
 }
 
 export function cmdRestore(cwd: string, target: string | undefined, opts: { at?: string }): void {

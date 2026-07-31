@@ -20,7 +20,7 @@ usage:
   chat rebase <session|name>                  reconcile a diverged session (replay tails onto trunk)
   chat split <session|name>                   turn a diverged branch into its own session
   chat fork <session|name> [--at <hash>]      fork a session (optionally from a past vault state)
-  chat open <session|name>                    open the transcript file ($EDITOR, pulls if needed)
+  chat open <session|name|memory.md>          open a transcript or memory file ($EDITOR, else OS default; pulls if needed)
   chat rm <session|name> [--force]            delete a session (local + vault; vault history keeps it)
   chat restore [<session-id>] [--at <hash>]   resurrect a deleted session (no args: list deleted)
   chat ignore <session|name|glob>             never sync a session (.chatignore)
