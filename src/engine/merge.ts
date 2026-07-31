@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import type { ActiveAdapter } from '../adapters/registry.js';
 import { canonForCompare, compareCtxs, type PathCtx } from '../adapters/types.js';
-import { CssError, isPrefixOf, log, nowIso, sha256hex } from './common.js';
+import { CssError, fmtLocal, isPrefixOf, log, nowIso, sha256hex } from './common.js';
 import { readTranscript, writeTranscript, type SessionEntry } from './vault.js';
 
 /**
@@ -246,7 +246,7 @@ export function splitBranches(
 
 export function summarizeMerge(outcome: MergeOutcome, sessionId: string): void {
   log.info(`merged ${sessionId.slice(0, 8)} from: ${outcome.branchNames.join(', ')}`);
-  log.info(`sha256 ${sha256hex(outcome.mergedTok).slice(0, 12)}, ${splitLines(outcome.mergedTok).length} lines, ${outcome.removedConflicts} conflict cop${outcome.removedConflicts === 1 ? 'y' : 'ies'} cleared @ ${nowIso()}`);
+  log.info(`sha256 ${sha256hex(outcome.mergedTok).slice(0, 12)}, ${splitLines(outcome.mergedTok).length} lines, ${outcome.removedConflicts} conflict cop${outcome.removedConflicts === 1 ? 'y' : 'ies'} cleared @ ${fmtLocal(nowIso())}`);
 }
 
 // ---------------------------------------------------------------- orchestrators

@@ -43,3 +43,15 @@ export function isPrefixOf(shorter: string, longer: string): boolean {
 export function nowIso(): string {
   return new Date().toISOString();
 }
+
+/** Console display of a stored timestamp: MM/DD/YY, HH:MM in this machine's
+ *  timezone (Date renders in the OS zone natively). Stored data stays ISO
+ *  UTC everywhere — vault entries and markers must compare across devices;
+ *  only display goes local. Width is fixed (15 chars) so list columns align. */
+export function fmtLocal(ts?: string | number): string {
+  if (ts === undefined || ts === '') return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return String(ts);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())}/${String(d.getFullYear()).slice(2)}, ${p(d.getHours())}:${p(d.getMinutes())}`;
+}

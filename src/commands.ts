@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detectAdapters } from './adapters/registry.js';
 import { canonForCompare, compareCtxs } from './adapters/types.js';
-import { CssError, isPrefixOf, log, normalizeEol, nowIso, sha256hex } from './engine/common.js';
+import { CssError, fmtLocal, isPrefixOf, log, normalizeEol, nowIso, sha256hex } from './engine/common.js';
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
 import { pruneVault } from './engine/gc.js';
@@ -497,7 +497,7 @@ export function cmdList(cwd: string): void {
   }
   const nameWidth = Math.max(4, ...rows.map((r) => (r.name ?? '').length));
   for (const r of rows) {
-    const age = r.lastTs ? r.lastTs.slice(0, 16).replace('T', ' ') : '                ';
+    const age = r.lastTs ? fmtLocal(r.lastTs) : '               ';
     const flag = r.conflicts?.length ? ` [conflicts: ${r.conflicts.join(',')}]` : '';
     // Full id: it needs to be copy-pasteable into `claude --resume <id>`.
     log.info(
@@ -527,7 +527,7 @@ export function cmdStatus(cwd: string): void {
     return;
   }
   log.info(`repo: ${marker.slug} (${marker.dirName})${marker.dirty ? ' — DIRTY, last push failed' : ''}`);
-  log.info(`last push: ${marker.lastPush ?? 'never'}   last pull: ${marker.lastPull ?? 'never'}`);
+  log.info(`last push: ${marker.lastPush ? fmtLocal(marker.lastPush) : 'never'}   last pull: ${marker.lastPull ? fmtLocal(marker.lastPull) : 'never'}`);
 
   const ctx = buildCtx(root, cfg);
   const rows = collectRows(ctx);
@@ -700,7 +700,7 @@ export function cmdRestore(cwd: string, target: string | undefined, opts: { at?:
       log.info('no deleted sessions found in vault history');
       return;
     }
-    for (const r of removed) log.info(`${r.id}  ${r.when.replace('T', ' ')}  ${r.name ?? ''}`);
+    for (const r of removed) log.info(`${r.id}  ${fmtLocal(r.when)}  ${r.name ?? ''}`);
     log.info('restore one with: chat restore <id>');
     return;
   }
@@ -867,7 +867,7 @@ export function cmdMemory(cwd: string): void {
   }
   const w = Math.max(4, ...rows.map((r) => r.file.length));
   for (const r of rows) {
-    const when = new Date(r.mtimeMs).toISOString().slice(0, 16).replace('T', ' ');
+    const when = fmtLocal(r.mtimeMs);
     log.info(`${r.file.padEnd(w)}  ${r.tool.padEnd(6)}  ${r.state.padEnd(11)}  ${r.device.padEnd(12)}  ${when}`);
   }
 }
