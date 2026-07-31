@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { CssError, sha256hex } from './common.js';
+import { canonForCompare, compareCtxs } from '../adapters/types.js';
+import { CssError, isPrefixOf, sha256hex } from './common.js';
 import { resolveRepoKey, type SyncCtx } from './sync.js';
-import { Vault, type SessionEntry } from './vault.js';
+import { Vault, readTranscript, type SessionEntry } from './vault.js';
 
 /**
  * Delete one session everywhere this machine can reach: local transcript(s)
@@ -38,12 +39,22 @@ export function rmSession(ctx: SyncCtx, sessionId: string, opts: { force?: boole
 
   if (!opts.force) {
     for (const { a, ref } of localRefs) {
-      const tok = a.adapter.tokenize(readFileSync(ref!.filePath, 'utf8'), {
-        projectRoot: ctx.repoRoot,
-        home: ctx.home,
-        toolDataDir: a.env.dataDir,
-      }, { json: true });
-      if (!entry || sha256hex(tok) !== entry.sha256) {
+      const pathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: a.env.dataDir };
+      const tok = a.adapter.tokenize(readFileSync(ref!.filePath, 'utf8'), pathCtx, { json: true });
+      // sha match is a fast positive only — a vault copy written by another
+      // device canon-equals ours with a different sha, and must still be
+      // deletable without --force. Refuse only when local truly has more.
+      let synced = entry !== undefined && sha256hex(tok) === entry.sha256;
+      if (!synced && entry) {
+        const raw = readTranscript(join(vault.path, key.dirName, a.adapter.id, 'sessions', sessionId));
+        if (raw !== null) {
+          const ctxs = compareCtxs(pathCtx, project?.tools[a.adapter.id]?.deviceCtxs, ctx.cfg.device);
+          const vaultCanon = canonForCompare(a.adapter, raw, ctxs, { json: true });
+          const localCanon = canonForCompare(a.adapter, tok, ctxs, { json: true });
+          synced = vaultCanon === localCanon || isPrefixOf(localCanon, vaultCanon);
+        }
+      }
+      if (!synced) {
         throw new CssError(
           `local copy of ${sessionId.slice(0, 8)} has turns the vault does not (or was never synced)`,
           'chat push first, or chat rm --force to delete anyway',

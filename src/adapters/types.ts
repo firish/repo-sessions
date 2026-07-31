@@ -54,6 +54,41 @@ export interface AdapterEnv {
   dataDir: string;
 }
 
+/**
+ * Comparison normal form: collapse EVERY known device's path spellings.
+ *
+ * Tokenization is machine-relative, and transcripts can quote path spellings
+ * as data (a pasted dirname, a meta.json dump, terminal output — any session
+ * about the tool itself). Device A pushes such content with B's spellings
+ * intact (it cannot recognize them); B's own tokenize collapses them. No
+ * single machine's tokenize can therefore reproduce vault bytes written by
+ * another — shas disagree forever, every pull misreads the session as
+ * diverged, and every rebase splices a false tail (duplicating turns).
+ *
+ * The fix: comparisons and trunk-finding never touch raw bytes. Both sides
+ * are first folded through tokenize under every device ctx recorded in the
+ * vault (deterministic order: local first, then foreign sorted by device
+ * name). Tokens are inert under further tokenize, so the fold is a
+ * projection — applying it twice equals applying it once. The result is
+ * compare-only: vault writes always store the writer's own tokenize output,
+ * installs always rehydrate the raw vault bytes.
+ */
+export function canonForCompare(adapter: Adapter, content: string, ctxs: PathCtx[], opts?: SubstOpts): string {
+  let out = content;
+  for (const c of ctxs) out = adapter.tokenize(out, c, opts);
+  return out;
+}
+
+/** The ctx fold order for canonForCompare: this machine, then every other
+ *  device the vault has seen for this tool, sorted for determinism. */
+export function compareCtxs(local: PathCtx, deviceCtxs: Record<string, PathCtx> | undefined, selfDevice: string): PathCtx[] {
+  const foreign = Object.entries(deviceCtxs ?? {})
+    .filter(([device]) => device !== selfDevice)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, c]) => c);
+  return [local, ...foreign];
+}
+
 export interface Adapter {
   id: string;
   detect(env: AdapterEnv): boolean;

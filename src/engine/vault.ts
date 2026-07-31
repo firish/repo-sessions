@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
+import type { PathCtx } from '../adapters/types.js';
 import { CssError, log } from './common.js';
 import type { CssConfig } from './config.js';
 import { git } from './git.js';
@@ -38,7 +39,17 @@ export interface MemoryEntry {
 export interface ProjectEntry {
   slug: string;
   origin: string;
-  tools: Record<string, { sessions: Record<string, SessionEntry>; memory?: Record<string, MemoryEntry> }>;
+  tools: Record<string, ToolEntry>;
+}
+
+export interface ToolEntry {
+  sessions: Record<string, SessionEntry>;
+  memory?: Record<string, MemoryEntry>;
+  /** Each device's path context for this tool+project, recorded at push.
+   *  Lets any machine fold OTHER devices' spellings when comparing content
+   *  (canonForCompare) — quoted foreign paths otherwise read as divergence.
+   *  Additive: older clients ignore and round-trip it. */
+  deviceCtxs?: Record<string, PathCtx>;
 }
 
 export interface VaultIndex {

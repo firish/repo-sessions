@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ActiveAdapter } from '../adapters/registry.js';
-import type { PathCtx } from '../adapters/types.js';
+import { canonForCompare, compareCtxs, type PathCtx } from '../adapters/types.js';
 import { isPrefixOf, log, normalizeEol, nowIso, sha256hex } from './common.js';
 import type { CssConfig } from './config.js';
 import { originUrl } from './git.js';
@@ -96,6 +96,8 @@ export function pushSessions(ctx: SyncCtx): PushResult {
   for (const { adapter, env } of ctx.adapters) {
     const tool = (project.tools[adapter.id] ??= { sessions: {} });
     const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
+    tool.deviceCtxs = { ...tool.deviceCtxs, [ctx.cfg.device]: pathCtx };
+    const ctxs = compareCtxs(pathCtx, tool.deviceCtxs, ctx.cfg.device);
 
     for (const ref of adapter.locate(ctx.repoRoot, env)) {
       if (ctx.ignore?.(ref.sessionId, tool.sessions[ref.sessionId]?.name)) {
@@ -106,6 +108,11 @@ export function pushSessions(ctx: SyncCtx): PushResult {
       const sha = sha256hex(tokenized);
       const sessionDir = join(projectDir, adapter.id, 'sessions', ref.sessionId);
       const existing = readTranscript(sessionDir);
+      // Compare in the cross-device normal form — vault bytes carry another
+      // device's tokenization, and either side may quote the other machine's
+      // spellings as data. Byte-compare misreads that as divergence forever.
+      const existingCanon = existing === null ? null : canonForCompare(adapter, existing, ctxs, { json: true });
+      const localCanon = canonForCompare(adapter, tokenized, ctxs, { json: true });
 
       const entry: SessionEntry = {
         byteLen: Buffer.byteLength(tokenized),
@@ -121,19 +128,19 @@ export function pushSessions(ctx: SyncCtx): PushResult {
         name: tool.sessions[ref.sessionId]?.name,
       };
 
-      if (existing === null) {
+      if (existingCanon === null) {
         writeTranscript(sessionDir, tokenized);
         tool.sessions[ref.sessionId] = entry;
         result.pushed++;
-      } else if (existing === tokenized) {
+      } else if (existingCanon === localCanon) {
         tool.sessions[ref.sessionId] ??= entry;
         result.upToDate++;
         continue;
-      } else if (isPrefixOf(existing, tokenized)) {
+      } else if (isPrefixOf(existingCanon, localCanon)) {
         writeTranscript(sessionDir, tokenized);
         tool.sessions[ref.sessionId] = entry;
         result.fastForwarded++;
-      } else if (isPrefixOf(tokenized, existing)) {
+      } else if (isPrefixOf(localCanon, existingCanon)) {
         result.remoteAhead++; // another device is further along; pull will catch us up
         continue;
       } else {
@@ -258,6 +265,7 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
     const tool = project.tools[adapter.id];
     if (!tool) continue;
     const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
+    const ctxs = compareCtxs(pathCtx, tool.deviceCtxs, ctx.cfg.device);
     // Local files may live under legacy munge variants — resolve by session id,
     // never by recomputing the directory name.
     const localById = new Map(adapter.locate(ctx.repoRoot, env).map((r) => [r.sessionId, r]));
@@ -284,14 +292,17 @@ export function pullSessions(ctx: SyncCtx, onlyId?: string): PullResult {
       }
 
       const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx, { json: true });
-      if (localTok === tokenized) {
+      // Same normal-form rule as push: never byte-compare vault bytes.
+      const vaultCanon = canonForCompare(adapter, tokenized, ctxs, { json: true });
+      const localCanon = canonForCompare(adapter, localTok, ctxs, { json: true });
+      if (localCanon === vaultCanon) {
         result.upToDate++;
-      } else if (isPrefixOf(localTok, tokenized)) {
+      } else if (isPrefixOf(localCanon, vaultCanon)) {
         writeFileSync(local.filePath, adapter.rehydrate(tokenized, pathCtx, { json: true }));
         result.fastForwarded++;
         result.updatedIds.push(sessionId);
         result.detail[sessionId] = { summary: entry.summary, device: entry.device };
-      } else if (isPrefixOf(tokenized, localTok)) {
+      } else if (isPrefixOf(vaultCanon, localCanon)) {
         result.localAhead++; // we have unsynced turns; next push fast-forwards the vault
       } else {
         result.conflicts++;

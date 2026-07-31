@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'no
 import { basename, dirname, join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import type { ActiveAdapter } from '../adapters/registry.js';
-import type { PathCtx } from '../adapters/types.js';
+import { canonForCompare, compareCtxs, type PathCtx } from '../adapters/types.js';
 import { CssError, isPrefixOf, log, nowIso, sha256hex } from './common.js';
 import { readTranscript, writeTranscript, type SessionEntry } from './vault.js';
 
@@ -255,6 +255,24 @@ import { mkdirSync } from 'node:fs';
 import { Vault } from './vault.js';
 import { resolveRepoKey, type SyncCtx } from './sync.js';
 
+/** Keep the per-session meta.json mirror in step with the index entry —
+ *  push writes both, so rebase/split must too or meta serves stale
+ *  sha/device/conflicts to anyone reading the vault directly. */
+function patchMeta(sessionDir: string, entry: SessionEntry): void {
+  const metaPath = join(sessionDir, 'meta.json');
+  if (!existsSync(metaPath)) return;
+  const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as Record<string, unknown>;
+  delete meta.conflicts;
+  writeFileSync(
+    metaPath,
+    `${JSON.stringify(
+      { ...meta, byteLen: entry.byteLen, sha256: entry.sha256, device: entry.device, syncedAt: entry.syncedAt, ...(entry.conflicts ? { conflicts: entry.conflicts } : {}) },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 export interface MergeSessionResult {
   mode: 'merge' | 'split';
   outcome?: MergeOutcome;
@@ -279,8 +297,18 @@ export function mergeSession(ctx: SyncCtx, sessionId: string, opts: { split?: bo
   const pathCtx: PathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: active.env.dataDir };
   const sessionDir = join(vault.path, key.dirName, active.adapter.id, 'sessions', sessionId);
   const localRef = active.adapter.locate(ctx.repoRoot, active.env).find((r) => r.sessionId === sessionId);
-  const localTok = localRef ? active.adapter.tokenize(readFileSync(localRef.filePath, 'utf8'), pathCtx, { json: true }) : null;
+  const localRaw = localRef ? active.adapter.tokenize(readFileSync(localRef.filePath, 'utf8'), pathCtx, { json: true }) : null;
+  // Trunk-finding must happen in the cross-device normal form: the vault
+  // transcript and conflict copies were tokenized on other devices, and a
+  // byte-level commonPrefixLen against them finds a false fork point wherever
+  // any copy quotes machine-specific spellings — each rebase would then
+  // splice an already-shared region again, duplicating turns.
+  const ctxs = compareCtxs(pathCtx, project.tools[active.adapter.id]?.deviceCtxs, ctx.cfg.device);
+  const canon = (s: string): string => canonForCompare(active.adapter, s, ctxs, { json: true });
+  const localTok = localRaw === null ? null : canon(localRaw);
   const sources = collectSources(sessionDir, localTok);
+  sources.canonicalTok = canon(sources.canonicalTok);
+  sources.conflicts = sources.conflicts.map((c) => ({ ...c, content: canon(c.content) }));
   const cwdForInstall = localRef?.cwd ?? active.adapter.rehydrate(entry.cwdTok, pathCtx);
 
   if (opts.split) {
@@ -294,6 +322,7 @@ export function mergeSession(ctx: SyncCtx, sessionId: string, opts: { split?: bo
       if (/^transcript\.conflict-.+\.jsonl(\.gz)?$/.test(e)) rmSync(join(sessionDir, e));
     }
     delete entry.conflicts;
+    patchMeta(sessionDir, entry);
     vault.saveIndex(index);
     vault.commitAndPush(`merge(${key.slug}): split ${splits.length} branch(es) of ${sessionId.slice(0, 8)} into new sessions`);
     // The old id converges on the vault transcript; the divergent local turns
@@ -312,6 +341,7 @@ export function mergeSession(ctx: SyncCtx, sessionId: string, opts: { split?: bo
   entry.device = ctx.cfg.device;
   entry.syncedAt = nowIso();
   delete entry.conflicts;
+  patchMeta(sessionDir, entry);
   vault.saveIndex(index);
   vault.commitAndPush(`merge(${key.slug}): reconciled ${sessionId.slice(0, 8)} from ${outcome.branchNames.length} branch(es)`);
 

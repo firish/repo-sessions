@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { detectAdapters } from './adapters/registry.js';
+import { canonForCompare, compareCtxs } from './adapters/types.js';
 import { CssError, isPrefixOf, log, normalizeEol, nowIso, sha256hex } from './engine/common.js';
 import { defaultVaultPath, deviceName, loadConfig, saveConfig, type CssConfig } from './engine/config.js';
 import { git, gitCommonDir, originUrl, repoToplevel } from './engine/git.js';
@@ -457,16 +458,24 @@ function collectRows(ctx: SyncCtx): Row[] {
         rows.push({ sessionId, name: entry.name, tool: adapter.id, state: 'remote', device: entry.device, lastTs: entry.lastTs, summary: entry.summary, conflicts: entry.conflicts });
         continue;
       }
-      const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), {
-        projectRoot: ctx.repoRoot,
-        home: ctx.home,
-        toolDataDir: env.dataDir,
-      }, { json: true });
+      const pathCtx = { projectRoot: ctx.repoRoot, home: ctx.home, toolDataDir: env.dataDir };
+      const localTok = adapter.tokenize(readFileSync(local.filePath, 'utf8'), pathCtx, { json: true });
       let state: Row['state'];
       if (sha256hex(localTok) === entry.sha256) state = 'synced';
       else {
-        const remoteTok = readTranscript(join(vault.path, key.dirName, adapter.id, 'sessions', sessionId)) ?? '';
-        state = isPrefixOf(remoteTok, localTok) ? 'ahead' : isPrefixOf(localTok, remoteTok) ? 'behind' : 'diverged';
+        // sha mismatch is only a hint: tokenization is machine-relative, so
+        // vault bytes from another device can canon-equal ours. Compare
+        // content in the cross-device normal form before calling anything
+        // diverged.
+        const ctxs = compareCtxs(pathCtx, project?.tools[adapter.id]?.deviceCtxs, ctx.cfg.device);
+        const remoteRaw = readTranscript(join(vault.path, key.dirName, adapter.id, 'sessions', sessionId)) ?? '';
+        const remoteCanon = canonForCompare(adapter, remoteRaw, ctxs, { json: true });
+        const localCanon = canonForCompare(adapter, localTok, ctxs, { json: true });
+        state =
+          remoteCanon === localCanon ? 'synced'
+          : isPrefixOf(remoteCanon, localCanon) ? 'ahead'
+          : isPrefixOf(localCanon, remoteCanon) ? 'behind'
+          : 'diverged';
       }
       rows.push({ sessionId, name: entry.name, tool: adapter.id, state, device: entry.device, lastTs: local.lastTs ?? entry.lastTs, summary: local.summary ?? entry.summary, conflicts: entry.conflicts });
     }
