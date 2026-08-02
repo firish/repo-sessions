@@ -33,6 +33,12 @@ export function seedSession(env: AdapterEnv, cwd: string, home: string): string 
   return filePath;
 }
 
+/** The per-turn title refresh Claude Code appends on whichever machine is
+ *  live — volatile metadata, lands at different positions on each device. */
+export function aiTitleLine(title: string): string {
+  return `${JSON.stringify({ type: 'ai-title', aiTitle: title, sessionId: FIXTURE_SID })}\n`;
+}
+
 /** A JSONL turn appended by a "resumed" session at `cwd`. */
 export function turnLine(cwd: string, uuid: string, text: string): string {
   return `${JSON.stringify({

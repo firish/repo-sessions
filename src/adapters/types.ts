@@ -66,15 +66,19 @@ export interface AdapterEnv {
  * diverged, and every rebase splices a false tail (duplicating turns).
  *
  * The fix: comparisons and trunk-finding never touch raw bytes. Both sides
- * are first folded through tokenize under every device ctx recorded in the
- * vault (deterministic order: local first, then foreign sorted by device
- * name). Tokens are inert under further tokenize, so the fold is a
- * projection — applying it twice equals applying it once. The result is
- * compare-only: vault writes always store the writer's own tokenize output,
- * installs always rehydrate the raw vault bytes.
+ * are first stripped of the adapter's volatile records (metadata the tool
+ * rewrites non-deterministically per machine — claude's per-turn ai-title
+ * refreshes land at different positions in each device's copy of the same
+ * conversation), then folded through tokenize under every device ctx
+ * recorded in the vault (deterministic order: local first, then foreign
+ * sorted by device name). Tokens are inert under further tokenize and
+ * stripping is idempotent, so the fold is a projection — applying it twice
+ * equals applying it once. The result is compare-only: vault writes always
+ * store the writer's own tokenize output, installs always rehydrate the raw
+ * vault bytes.
  */
 export function canonForCompare(adapter: Adapter, content: string, ctxs: PathCtx[], opts?: SubstOpts): string {
-  let out = content;
+  let out = adapter.stripVolatile ? adapter.stripVolatile(content) : content;
   for (const c of ctxs) out = adapter.tokenize(out, c, opts);
   return out;
 }
@@ -97,6 +101,11 @@ export interface Adapter {
   /** Absolute paths -> ${CSS_*} tokens (vault-canonical form).
    *  Pass json for JSONL content: matches JSON-escaped path spellings too. */
   tokenize(content: string, ctx: PathCtx, opts?: SubstOpts): string;
+  /** Drop records the tool rewrites non-deterministically per machine
+   *  (claude: per-turn ai-title refreshes), so honest copies of the same
+   *  conversation never disagree on them. Compare-only — vault and local
+   *  files keep their volatile records; only canonForCompare applies this. */
+  stripVolatile?(content: string): string;
   /** ${CSS_*} tokens -> concrete local paths.
    *  Pass json for JSONL content: emits JSON-escaped spellings so Windows
    *  backslashes never produce invalid escapes inside string literals. */

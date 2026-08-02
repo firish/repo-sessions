@@ -11,7 +11,7 @@ import { mergeSession } from '../src/engine/merge';
 import { repoKeyFromOrigin } from '../src/engine/repoKey';
 import { pullSessions, pushSessions, type SyncCtx } from '../src/engine/sync';
 import { readTranscript } from '../src/engine/vault';
-import { FIXTURE_SID, mkDevice, mkTmp, seedSession, turnLine } from './helpers';
+import { FIXTURE_SID, aiTitleLine, mkDevice, mkTmp, seedSession, turnLine } from './helpers';
 
 /**
  * Tokenization is machine-relative: device A cannot recognize device B's
@@ -75,6 +75,42 @@ describe('canonForCompare', () => {
     const twice = canonForCompare(claudeAdapter, once, ctxs, { json: true });
     expect(once).not.toBe(fromA); // the fold genuinely collapses quoted foreign spellings
     expect(twice).toBe(once);
+  });
+});
+
+describe('volatile ai-title records', () => {
+  it('stripVolatile drops ai-title lines in any key order but keeps turns that quote them as data', () => {
+    const title = aiTitleLine('Debug chat list divergence across machines');
+    const reordered = `${JSON.stringify({ sessionId: FIXTURE_SID, type: 'ai-title', aiTitle: 'retitled' })}\n`;
+    const quoting = turnLine('/tmp/x', QUOTE_UUID, 'look: {"type":"ai-title","aiTitle":"quoted as data"}');
+    expect(claudeAdapter.stripVolatile!(title + reordered + quoting)).toBe(quoting);
+    expect(claudeAdapter.stripVolatile!(quoting)).toBe(quoting);
+  });
+
+  it('interleaved title refreshes never read as divergence (incident: 003ab73d stuck diverged when truly behind)', () => {
+    const { ctxA, ctxB, fileA, fileB } = rig();
+    // A runs live: a title refresh lands mid-transcript before the push.
+    appendFileSync(fileA, aiTitleLine('Debug chat list divergence across machines'));
+    expect(pushSessions(ctxA).pushed).toBe(1);
+    expect(pullSessions(ctxB).installed).toBe(1);
+
+    // B's Claude Code generates its own title record locally.
+    appendFileSync(fileB, aiTitleLine('a title only B has'));
+    const pushB = pushSessions(ctxB);
+    expect(pushB.upToDate).toBe(1);
+    expect(pushB.conflicts).toBe(0);
+
+    // A continues the session (new turn + fresh title) — B's copy now has a
+    // title line the vault lacks AND the vault is longer: the 003ab73d shape.
+    appendFileSync(fileA, turnLine(ctxA.repoRoot, '88888888-8888-8888-8888-888888888888', 'continued on A'));
+    appendFileSync(fileA, aiTitleLine('Debug chat list divergence across machines'));
+    expect(pushSessions(ctxA).fastForwarded).toBe(1);
+
+    const pullB = pullSessions(ctxB);
+    expect(pullB.conflicts).toBe(0);
+    expect(pullB.fastForwarded).toBe(1); // behind, not diverged — pull heals it
+    expect(readFileSync(fileB, 'utf8')).toContain('continued on A');
+    expect(pushSessions(ctxB).upToDate).toBe(1);
   });
 });
 

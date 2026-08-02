@@ -138,6 +138,27 @@ export const claudeAdapter: Adapter = {
     return refs.sort((a, b) => a.mtimeMs - b.mtimeMs);
   },
 
+  // Claude Code appends an ai-title refresh record roughly every turn on
+  // whichever machine is live, so two honest copies of one conversation
+  // carry different counts at different positions (incident: 003ab73d read
+  // as permanently diverged when its content was a clean prefix). Only a
+  // line whose top-level type is ai-title is dropped — a turn that QUOTES
+  // an ai-title record as data parses to type user/assistant and survives.
+  stripVolatile(content: string): string {
+    if (!content.includes('"ai-title"')) return content;
+    return content
+      .split('\n')
+      .filter((line) => {
+        if (!line.includes('"ai-title"')) return true;
+        try {
+          return (JSON.parse(line) as { type?: unknown }).type !== 'ai-title';
+        } catch {
+          return true;
+        }
+      })
+      .join('\n');
+  },
+
   tokenize(content: string, ctx: PathCtx, opts?: SubstOpts): string {
     const json = opts?.json ?? false;
     let out = tokenizePath(content, ctx.projectRoot, TOKEN_ROOT, json);
