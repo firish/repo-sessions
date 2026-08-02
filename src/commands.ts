@@ -660,18 +660,39 @@ export function cmdFork(cwd: string, target: string | undefined, opts: { at?: st
 /** $VISUAL/$EDITOR first (may carry args, may be a .cmd shim — run through
  *  the shell, quoting only the path), else the OS default opener. The old
  *  fallback ran xdg-open on win32, which doesn't exist — open silently did
- *  nothing there beyond printing the path. */
+ *  nothing there beyond printing the path. Opener failures must surface: a
+ *  Mac with no .jsonl file association fails open(1) with
+ *  kLSApplicationNotFoundErr, and swallowing that reads as "open did
+ *  nothing". */
 function openPath(filePath: string): void {
   const editor = process.env.VISUAL ?? process.env.EDITOR;
   if (editor) {
-    spawnSync(`${editor} "${filePath}"`, { shell: true, stdio: 'inherit' });
+    const res = spawnSync(`${editor} "${filePath}"`, { shell: true, stdio: 'inherit' });
+    if (res.error || (res.status !== null && res.status !== 0)) {
+      throw new CssError(
+        `editor failed: ${editor} (${res.error?.message ?? `exit ${res.status}`})`,
+        'fix $VISUAL/$EDITOR, or unset it to use the OS default opener',
+      );
+    }
     return;
   }
   if (process.platform === 'win32') {
+    // explorer.exe exits 1 even on success — its status carries no signal.
     spawnSync('explorer', [filePath], { stdio: 'ignore' }); // default association / Open-With picker
-  } else {
-    spawnSync(process.platform === 'darwin' ? 'open' : 'xdg-open', [filePath], { stdio: 'ignore' });
+    return;
   }
+  const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const res = spawnSync(opener, [filePath], { stdio: ['ignore', 'ignore', 'pipe'] });
+  if (res.status === 0) return;
+  if (process.platform === 'darwin') {
+    // Usual cause: nothing claims .jsonl. -t hands it to the default text editor.
+    if (spawnSync('open', ['-t', filePath], { stdio: 'ignore' }).status === 0) return;
+  }
+  const detail = res.error?.message ?? res.stderr?.toString().trim().split('\n')[0];
+  throw new CssError(
+    `${opener} could not open the file${detail ? ` — ${detail}` : ''}`,
+    'set $EDITOR (e.g. export EDITOR=vim), or give .jsonl files a default app',
+  );
 }
 
 function findMemoryFile(ctx: SyncCtx, root: string, name: string): string | undefined {
