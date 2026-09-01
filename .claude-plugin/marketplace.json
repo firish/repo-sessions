@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Sessions and project memory that follow your repo — git-native sync for Claude Code (and Codex) through a private vault you own.",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "plugins": [
     {

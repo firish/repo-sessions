@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — 1.0.0 launch candidate
+## 1.0.0 — 2026-08-31
 
 Everything below is the initial public release.
 
@@ -40,7 +40,7 @@ resume canary). Aliases kept: `css` bin, `enable`, `duplicate`, `merge`.
 
 ### Proven
 
-56 hermetic tests green on macOS, Windows, and Linux (CI matrix); live
+61 hermetic tests green on macOS, Windows, and Linux (CI matrix); live
 end-to-end demos for both tools (`scripts/e2e-*.sh`); dogfooded across
 three real machines — including one cross-OS session resume that found and
 fixed two Windows byte-drift bugs before you had to hit them.

@@ -1,6 +1,6 @@
 {
   "name": "repo-sessions",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Your Claude Code and Codex sessions follow your repo, not your laptop. Git-native session + project-memory sync through a private vault you own — riding the git push/pull you already make.",
   "type": "module",
   "bin": {
